@@ -73,7 +73,7 @@ export const AuthService = {
 
         const refreshToken = jwt.sign(
             { id: user.id, jti: randomUUID() },
-            env.JWT_SECRET,
+            env.JWT_REFRESH_SECRET,
             { expiresIn: env.JWT_REFRESH_EXPIRY } as jwt.SignOptions
         );
 

@@ -6,13 +6,17 @@ export interface Booking {
     id: number;
     user_id: number;
     service_id: number;
+    agent_id?: number | null;
     address_id?: number;
     scheduled_date: string;
     scheduled_time: string;
     status: string;
     price: number;
     notes?: string;
+    assigned_at?: Date | null;
+    completed_at: Date | null;
     created_at: Date;
+    updated_at?: Date;
 }
 
 export const BookingModel = {
@@ -43,7 +47,8 @@ export const BookingModel = {
         const total = countRows[0].total;
 
         const query = `
-      SELECT b.*, 
+      SELECT b.id, b.user_id, b.service_id, b.agent_id, b.address_id, b.scheduled_date, b.scheduled_time,
+             b.status, b.price, b.notes, b.assigned_at, b.completed_at, b.created_at, b.updated_at,
              s.name as service_name, s.image_url as service_image, s.category as service_category, s.duration_minutes,
              a.line1 as address_line1, a.city as address_city, a.state as address_state, a.postal_code as address_postal_code,
              ag.full_name as agent_name, ag.phone as agent_phone
@@ -62,7 +67,9 @@ export const BookingModel = {
 
     async findById(id: number): Promise<Booking | null> {
         const [rows] = await pool.query<RowDataPacket[]>(
-            `SELECT b.*, s.name as service_name, s.duration_minutes, s.image_url as service_image, s.category as service_category,
+            `SELECT b.id, b.user_id, b.service_id, b.agent_id, b.address_id, b.scheduled_date, b.scheduled_time,
+                    b.status, b.price, b.notes, b.assigned_at, b.completed_at, b.created_at, b.updated_at,
+                    s.name as service_name, s.duration_minutes, s.image_url as service_image, s.category as service_category,
                     a.line1 as address_line1, a.city as address_city, a.state as address_state, a.postal_code as address_postal_code,
                     ag.full_name as agent_name, ag.phone as agent_phone
          FROM bookings b

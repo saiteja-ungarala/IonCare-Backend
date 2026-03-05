@@ -51,5 +51,28 @@ exports.WalletModel = {
             const [rows] = yield db_1.default.query('SELECT * FROM wallet_transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?', [userId, limit, offset]);
             return rows;
         });
+    },
+    creditWithIdempotency(userId_1, _a) {
+        return __awaiter(this, arguments, void 0, function* (userId, { amount, txn_type, source, idempotency_key, }) {
+            const connection = yield db_1.default.getConnection();
+            try {
+                yield connection.beginTransaction();
+                const [insertResult] = yield connection.query(`INSERT IGNORE INTO wallet_transactions
+                (user_id, txn_type, source, reference_type, amount, description, idempotency_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`, [userId, txn_type, source, 'wallet', amount, 'Idempotent wallet transaction', idempotency_key]);
+                if (insertResult.affectedRows > 0) {
+                    const balanceChange = txn_type === 'credit' ? amount : -amount;
+                    yield connection.query('UPDATE wallets SET balance = balance + ? WHERE user_id = ?', [balanceChange, userId]);
+                }
+                yield connection.commit();
+            }
+            catch (error) {
+                yield connection.rollback();
+                throw error;
+            }
+            finally {
+                connection.release();
+            }
+        });
     }
 };

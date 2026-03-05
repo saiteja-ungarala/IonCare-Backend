@@ -4,7 +4,7 @@ import crypto from 'crypto';
 
 export interface User {
     id?: number;
-    role: 'customer' | 'agent' | 'dealer';
+    role: 'customer' | 'agent' | 'dealer' | 'admin';
     full_name: string;
     email: string;
     phone?: string;

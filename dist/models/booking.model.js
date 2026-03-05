@@ -37,7 +37,8 @@ exports.BookingModel = {
             const [countRows] = yield db_1.default.query(`SELECT COUNT(*) as total FROM bookings b ${where}`, values);
             const total = countRows[0].total;
             const query = `
-      SELECT b.*, 
+      SELECT b.id, b.user_id, b.service_id, b.agent_id, b.address_id, b.scheduled_date, b.scheduled_time,
+             b.status, b.price, b.notes, b.assigned_at, b.completed_at, b.created_at, b.updated_at,
              s.name as service_name, s.image_url as service_image, s.category as service_category, s.duration_minutes,
              a.line1 as address_line1, a.city as address_city, a.state as address_state, a.postal_code as address_postal_code,
              ag.full_name as agent_name, ag.phone as agent_phone
@@ -56,7 +57,9 @@ exports.BookingModel = {
     },
     findById(id) {
         return __awaiter(this, void 0, void 0, function* () {
-            const [rows] = yield db_1.default.query(`SELECT b.*, s.name as service_name, s.duration_minutes, s.image_url as service_image, s.category as service_category,
+            const [rows] = yield db_1.default.query(`SELECT b.id, b.user_id, b.service_id, b.agent_id, b.address_id, b.scheduled_date, b.scheduled_time,
+                    b.status, b.price, b.notes, b.assigned_at, b.completed_at, b.created_at, b.updated_at,
+                    s.name as service_name, s.duration_minutes, s.image_url as service_image, s.category as service_category,
                     a.line1 as address_line1, a.city as address_city, a.state as address_state, a.postal_code as address_postal_code,
                     ag.full_name as agent_name, ag.phone as agent_phone
          FROM bookings b

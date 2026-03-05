@@ -1,0 +1,76 @@
+B1 Security Hardening - Change Overview
+Date: 2026-03-05
+Scope: Backend only (PROMPT B1)
+
+1) Environment hardening
+- File: src/config/env.ts
+- Removed insecure hardcoded fallbacks for secrets/passwords.
+- Added startup validation to fail fast when required vars are missing.
+- Required vars now include:
+  PORT, DB_PORT, DB_HOST, DB_USER, DB_PASSWORD, DB_NAME,
+  JWT_SECRET, JWT_REFRESH_SECRET, JWT_ACCESS_EXPIRY, JWT_REFRESH_EXPIRY.
+- Added JWT_REFRESH_SECRET support as a separate required secret.
+
+2) DB config cleanup
+- File: src/config/db.ts
+- Switched DB port usage to env.DB_PORT (no direct fallback from process.env in db config).
+
+3) JWT refresh secret separation
+- File: src/services/auth.service.ts
+- Refresh token signing now uses env.JWT_REFRESH_SECRET.
+- Access token signing continues to use env.JWT_SECRET.
+
+4) Gateway security updates
+- File: src/gateway.ts
+- Replaced open CORS with allowlist-based CORS using ALLOWED_ORIGINS.
+- Added Helmet config:
+  - CSP directives: defaultSrc self, imgSrc self/data/https
+  - HSTS: 1 year + include subdomains
+- Added health endpoint:
+  GET /health -> { status: "ok", timestamp: ISO string }
+- Added route-specific rate limits:
+  - POST /api/auth/login      : 5 per 15 minutes per IP
+  - POST /api/auth/signup     : 10 per hour per IP
+  - POST /api/auth/send-otp   : 3 per hour per IP
+  - POST /api/agent/kyc       : 10 per hour per IP
+  - POST /api/dealer/kyc      : 10 per hour per IP
+
+5) Upload security hardening
+- File: src/middlewares/upload.middleware.ts
+- Multer temp filename changed to UUID-based (.upload), no client filename usage.
+- Prevents path traversal and unsafe client name propagation.
+
+- File: src/middlewares/upload-validate.middleware.ts (new)
+- Reads uploaded file from disk and validates by magic-bytes using file-type.
+- Allowed MIME types:
+  image/jpeg, image/png, application/pdf
+- Enforces max size: 5MB (returns 400 for oversized/invalid uploads).
+- Deletes invalid files from disk immediately.
+- Renames valid files to UUID + safe extension (.jpg/.png/.pdf).
+
+- File: src/routers/agent.routes.ts
+- Applied validateUploadedFiles middleware after multer on POST /agent/kyc.
+
+- File: src/routers/dealer.routes.ts
+- Applied validateUploadedFiles middleware after multer on POST /dealer/kyc.
+
+6) Error handling updates
+- File: src/middlewares/error.middleware.ts
+- Added explicit CORS error mapping to HTTP 403 with "CORS" message.
+- Added multer LIMIT_FILE_SIZE mapping to HTTP 400 with 5MB message.
+
+7) Dependencies added
+- File: package.json
+- Added:
+  - express-rate-limit
+  - file-type
+
+8) Build/verification status
+- TypeScript build passed: npm run build.
+- Startup guard verified:
+  Missing required env (example DB_PASSWORD) throws:
+  "Required env vars missing"
+
+9) Out-of-scope (not changed)
+- No database migrations/schema changes.
+- No non-B1 feature implementation.

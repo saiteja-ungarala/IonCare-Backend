@@ -87,7 +87,7 @@ exports.AuthService = {
     generateTokens(user) {
         return __awaiter(this, void 0, void 0, function* () {
             const accessToken = jsonwebtoken_1.default.sign({ id: user.id, role: user.role, email: user.email }, env_1.env.JWT_SECRET, { expiresIn: env_1.env.JWT_ACCESS_EXPIRY });
-            const refreshToken = jsonwebtoken_1.default.sign({ id: user.id, jti: (0, crypto_1.randomUUID)() }, env_1.env.JWT_SECRET, { expiresIn: env_1.env.JWT_REFRESH_EXPIRY });
+            const refreshToken = jsonwebtoken_1.default.sign({ id: user.id, jti: (0, crypto_1.randomUUID)() }, env_1.env.JWT_REFRESH_SECRET, { expiresIn: env_1.env.JWT_REFRESH_EXPIRY });
             // Store refresh token in DB
             const expiresAt = new Date();
             expiresAt.setDate(expiresAt.getDate() + 7); // 7 days

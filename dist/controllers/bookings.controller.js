@@ -16,7 +16,7 @@ const getBookings = (req, res, next) => __awaiter(void 0, void 0, void 0, functi
     try {
         const userId = req.user.id;
         const result = yield bookings_service_1.BookingService.getBookings(userId, req.query);
-        return (0, response_1.successResponse)(res, result.data); // Should return pagination object too
+        return (0, response_1.successResponse)(res, result.data);
     }
     catch (error) {
         next(error);

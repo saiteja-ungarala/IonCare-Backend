@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ProfileService } from '../services/profile.service';
+import { PushTokenModel } from '../models/push-token.model';
 import { successResponse } from '../utils/response';
 
 export const getProfile = async (req: Request, res: Response, next: NextFunction) => {
@@ -70,6 +71,17 @@ export const setAddressDefault = async (req: Request, res: Response, next: NextF
         const addressId = Number(req.params.id);
         const result = await ProfileService.setAddressDefault(userId, addressId);
         return successResponse(res, result, 'Default address updated');
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const registerPushToken = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = (req.user as any).id;
+        const { token, platform } = req.body;
+        await PushTokenModel.upsert(userId, token, platform);
+        return successResponse(res, { success: true });
     } catch (error) {
         next(error);
     }

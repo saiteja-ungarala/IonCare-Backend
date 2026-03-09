@@ -1,7 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.UpdateAddressSchema = exports.AddressSchema = void 0;
+exports.UpdateAddressSchema = exports.AddressSchema = exports.PushTokenSchema = void 0;
 const zod_1 = require("zod");
+exports.PushTokenSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        token: zod_1.z.string().min(1, 'token is required'),
+        platform: zod_1.z.enum(['ios', 'android', 'web']),
+    }),
+});
 exports.AddressSchema = zod_1.z.object({
     body: zod_1.z.object({
         label: zod_1.z.string().optional(),

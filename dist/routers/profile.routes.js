@@ -42,6 +42,7 @@ const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authenticate); // Protect all routes
 router.get('/profile', ProfileController.getProfile);
 router.patch('/profile', ProfileController.updateProfile);
+router.post('/push-token', (0, validate_middleware_1.validate)(address_dto_1.PushTokenSchema), ProfileController.registerPushToken);
 router.get('/addresses', ProfileController.getAddresses);
 router.post('/addresses', (0, validate_middleware_1.validate)(address_dto_1.AddressSchema), ProfileController.addAddress);
 router.patch('/addresses/:id/default', ProfileController.setAddressDefault);

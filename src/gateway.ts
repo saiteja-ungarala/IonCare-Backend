@@ -7,6 +7,7 @@ import routes from './routers';
 import { errorHandler } from './middlewares/error.middleware';
 
 const app = express();
+app.set('trust proxy', 1);
 const ALLOWED = (process.env.ALLOWED_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean);
 
 const createPostRateLimiter = (windowMs: number, max: number, message: string) => rateLimit({
@@ -43,6 +44,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Static files (login page, etc.)
 app.use(express.static(path.join(__dirname, '../public')));
+app.use('/admin', express.static(path.join(__dirname, '../public')));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Health check

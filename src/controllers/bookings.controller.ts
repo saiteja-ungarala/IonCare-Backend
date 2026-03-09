@@ -32,3 +32,14 @@ export const cancelBooking = async (req: Request, res: Response, next: NextFunct
         next(error);
     }
 };
+
+export const getBookingUpdates = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = (req.user as any).id;
+        const bookingId = Number(req.params.bookingId);
+        const updates = await BookingService.getBookingUpdates(userId, bookingId);
+        return successResponse(res, updates);
+    } catch (error) {
+        next(error);
+    }
+};

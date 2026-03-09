@@ -1,6 +1,12 @@
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
+import pool from '../config/db';
 import { BookingModel } from '../models/booking.model';
+import { BookingUpdateModel } from '../models/booking-update.model';
 import { ServiceModel } from '../models/service.model';
 import { AddressModel } from '../models/address.model';
+import { UserModel } from '../models/user.model';
+import { EmailService } from './email.service';
+import { NotificationService } from './notification.service';
 import { BOOKING_STATUS } from '../config/constants';
 
 // Map status query param to actual DB status values
@@ -42,17 +48,80 @@ export const BookingService = {
             if (!address || address.user_id !== userId) throw { type: 'AppError', message: 'Invalid address', statusCode: 400 };
         }
 
-        const bookingId = await BookingModel.create({
-            user_id: userId,
-            service_id: data.service_id,
-            address_id: data.address_id,
-            scheduled_date: data.scheduled_date,
-            scheduled_time: data.scheduled_time,
-            price: service.base_price,
-            notes: data.notes,
-        });
+        // Transactional booking create — checks First Service Free benefit
+        const conn = await pool.getConnection();
+        await conn.beginTransaction();
+        let bookingId = 0;
+        try {
+            const [benefits] = await conn.execute<RowDataPacket[]>(
+                `SELECT * FROM user_benefits
+                 WHERE user_id = ? AND benefit_code = 'FIRST_SERVICE_FREE' AND status = 'unused'
+                 FOR UPDATE`,
+                [userId]
+            );
+            const hasFree = benefits.length > 0;
+            const finalPrice = hasFree ? 0 : service.base_price;
 
-        return BookingModel.findById(bookingId);
+            const [result] = await conn.execute<ResultSetHeader>(
+                `INSERT INTO bookings (user_id, service_id, address_id, scheduled_date, scheduled_time, status, price, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    userId, data.service_id, data.address_id || null,
+                    data.scheduled_date, data.scheduled_time,
+                    BOOKING_STATUS.PENDING, finalPrice, data.notes || null,
+                ]
+            );
+            bookingId = result.insertId;
+
+            if (hasFree) {
+                await conn.execute(
+                    `UPDATE user_benefits SET status = 'used', used_at = NOW(), used_booking_id = ?
+                     WHERE id = ?`,
+                    [bookingId, benefits[0].id]
+                );
+            }
+
+            await conn.commit();
+        } catch (err) {
+            await conn.rollback();
+            throw err;
+        } finally {
+            conn.release();
+        }
+
+        const booking = await BookingModel.findById(bookingId);
+
+        // Fire-and-forget: send booking confirmation email + push
+        UserModel.findById(userId).then((user) => {
+            if (user?.email && booking) {
+                const address = [
+                    (booking as any).address_line1,
+                    (booking as any).address_city,
+                ].filter(Boolean).join(', ') || 'Address on file';
+                EmailService.sendBookingConfirmation(user.email, {
+                    bookingId,
+                    serviceName: service.name,
+                    scheduledDate: `${data.scheduled_date} ${data.scheduled_time}`,
+                    address,
+                });
+            }
+            NotificationService.sendToUser(userId, 'Booking Confirmed', 'Finding your technician...', { type: 'booking_created', bookingId });
+        }).catch((err) => console.error('[BookingService] notification error:', err));
+
+        return booking;
+    },
+
+    async getBookingUpdates(userId: number, bookingId: number) {
+        const booking = await BookingModel.findById(bookingId);
+        if (!booking) {
+            throw { type: 'AppError', message: 'Booking not found', statusCode: 404 };
+        }
+
+        if (Number(booking.user_id) !== userId && Number(booking.agent_id) !== userId) {
+            throw { type: 'AppError', message: 'Forbidden', statusCode: 403 };
+        }
+
+        return BookingUpdateModel.findByBookingId(bookingId);
     },
 
     async cancelBooking(userId: number, bookingId: number) {

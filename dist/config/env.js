@@ -2,7 +2,7 @@
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
-var _a, _b;
+var _a, _b, _c;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.env = void 0;
 const dotenv_1 = __importDefault(require("dotenv"));
@@ -31,4 +31,11 @@ exports.env = {
     JWT_ACCESS_EXPIRY: getRequiredEnv('JWT_ACCESS_EXPIRY'),
     JWT_REFRESH_EXPIRY: getRequiredEnv('JWT_REFRESH_EXPIRY'),
     NODE_ENV: (_b = process.env.NODE_ENV) !== null && _b !== void 0 ? _b : 'production',
+    RAZORPAY_KEY_ID: getRequiredEnv('RAZORPAY_KEY_ID'),
+    RAZORPAY_KEY_SECRET: getRequiredEnv('RAZORPAY_KEY_SECRET'),
+    RAZORPAY_WEBHOOK_SECRET: getRequiredEnv('RAZORPAY_WEBHOOK_SECRET'),
+    FAST2SMS_API_KEY: getRequiredEnv('FAST2SMS_API_KEY'),
+    SENDGRID_API_KEY: getRequiredEnv('SENDGRID_API_KEY'),
+    FROM_EMAIL: getRequiredEnv('FROM_EMAIL'),
+    GOOGLE_MAPS_API_KEY: (_c = process.env.GOOGLE_MAPS_API_KEY) !== null && _c !== void 0 ? _c : '',
 };

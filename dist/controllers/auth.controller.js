@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.forgotPassword = exports.me = exports.logout = exports.refresh = exports.login = exports.signup = void 0;
+exports.verifyOtp = exports.sendOtp = exports.resetPassword = exports.forgotPassword = exports.me = exports.logout = exports.refresh = exports.login = exports.signup = void 0;
 const auth_service_1 = require("../services/auth.service");
 const user_model_1 = require("../models/user.model");
 const wallet_model_1 = require("../models/wallet.model");
@@ -81,16 +81,43 @@ const me = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     }
 });
 exports.me = me;
-const forgotPassword = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+const forgotPassword = (req, res, _next) => __awaiter(void 0, void 0, void 0, function* () {
+    const { email } = req.body;
+    // Fire-and-forget — never await, never reveal if email exists
+    auth_service_1.AuthService.initiateForgotPassword(email).catch((err) => console.error('[Auth] forgotPassword error:', err));
+    return (0, response_1.successResponse)(res, null, 'If that email exists a reset link was sent');
+});
+exports.forgotPassword = forgotPassword;
+const resetPassword = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { email } = req.body;
-        // Log the request for future email integration
-        console.log(`[Auth] Password reset requested for: ${email}`);
-        // Always return success for security (don't leak which emails exist)
-        return (0, response_1.successResponse)(res, null, 'If this email exists, we sent reset instructions.');
+        const { token, newPassword } = req.body;
+        yield auth_service_1.AuthService.resetPassword(token, newPassword);
+        return (0, response_1.successResponse)(res, null, 'Password reset successfully');
     }
     catch (error) {
         next(error);
     }
 });
-exports.forgotPassword = forgotPassword;
+exports.resetPassword = resetPassword;
+const sendOtp = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { phone } = req.body;
+        yield auth_service_1.AuthService.sendOTP(phone);
+        return (0, response_1.successResponse)(res, null, 'OTP sent');
+    }
+    catch (error) {
+        next(error);
+    }
+});
+exports.sendOtp = sendOtp;
+const verifyOtp = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { phone, otp } = req.body;
+        const result = yield auth_service_1.AuthService.loginWithOTP(phone, otp);
+        return (0, response_1.successResponse)(res, result, 'Login successful');
+    }
+    catch (error) {
+        next(error);
+    }
+});
+exports.verifyOtp = verifyOtp;

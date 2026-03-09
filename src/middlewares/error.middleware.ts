@@ -18,7 +18,7 @@ export const errorHandler = (err: any, req: Request, res: Response, next: NextFu
     }
 
     if (err.type === 'AppError') {
-        return errorResponse(res, err.message, err.statusCode);
+        return errorResponse(res, err.message, err.statusCode, err.code ? { code: err.code } : null);
     }
 
     return errorResponse(res, 'Internal Server Error', 500, err.message);

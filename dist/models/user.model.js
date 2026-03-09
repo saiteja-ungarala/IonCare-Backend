@@ -73,5 +73,27 @@ exports.UserModel = {
         return __awaiter(this, void 0, void 0, function* () {
             yield db_1.default.query('UPDATE auth_sessions SET revoked_at = NOW() WHERE user_id = ?', [userId]);
         });
-    }
+    },
+    findByPhone(phone) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const [rows] = yield db_1.default.query('SELECT * FROM users WHERE phone = ? AND is_active = 1', [phone]);
+            return rows[0] || null;
+        });
+    },
+    setResetToken(userId, hashedToken, expires) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield db_1.default.query('UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE id = ?', [hashedToken, expires, userId]);
+        });
+    },
+    findByResetToken(hashedToken) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const [rows] = yield db_1.default.query('SELECT * FROM users WHERE reset_token = ? AND reset_token_expires > NOW()', [hashedToken]);
+            return rows[0] || null;
+        });
+    },
+    clearResetToken(userId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield db_1.default.query('UPDATE users SET reset_token = NULL, reset_token_expires = NULL WHERE id = ?', [userId]);
+        });
+    },
 };

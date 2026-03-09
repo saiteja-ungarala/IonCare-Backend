@@ -18,7 +18,7 @@ const errorHandler = (err, req, res, next) => {
         return (0, response_1.errorResponse)(res, 'File too large. Maximum size is 5MB', 400);
     }
     if (err.type === 'AppError') {
-        return (0, response_1.errorResponse)(res, err.message, err.statusCode);
+        return (0, response_1.errorResponse)(res, err.message, err.statusCode, err.code ? { code: err.code } : null);
     }
     return (0, response_1.errorResponse)(res, 'Internal Server Error', 500, err.message);
 };

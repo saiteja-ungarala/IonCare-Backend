@@ -37,3 +37,21 @@ export const AgentCampaignProgressSchema = z.object({
         campaignId: z.coerce.number().int().positive(),
     }),
 });
+
+export const AgentLocationSchema = z.object({
+    body: z.object({
+        lat: z.number().min(-90).max(90),
+        lng: z.number().min(-180).max(180),
+    }),
+});
+
+export const AgentJobUpdateSchema = z.object({
+    params: z.object({
+        bookingId: z.coerce.number().int().positive(),
+    }),
+    body: z.object({
+        update_type: z.enum(['arrived', 'diagnosed', 'in_progress', 'completed', 'photo', 'note']),
+        note: z.string().optional(),
+        media_url: z.string().url().optional(),
+    }),
+});

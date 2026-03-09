@@ -137,3 +137,24 @@ export const getCampaignProgress = async (req: Request, res: Response, next: Nex
         next(error);
     }
 };
+
+export const patchLocation = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const agentId = getAgentIdFromRequest(req);
+        const result = await AgentService.updateLocation(agentId, req.body.lat, req.body.lng);
+        return successResponse(res, result, 'Location updated');
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const postJobUpdate = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const agentId = getAgentIdFromRequest(req);
+        const bookingId = Number(req.params.bookingId);
+        const result = await AgentService.postJobUpdate(agentId, bookingId, req.body);
+        return successResponse(res, result, 'Update posted', 201);
+    } catch (error) {
+        next(error);
+    }
+};

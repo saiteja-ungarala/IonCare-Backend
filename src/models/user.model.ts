@@ -74,5 +74,35 @@ export const UserModel = {
 
     async revokeAllUserSessions(userId: number): Promise<void> {
         await pool.query('UPDATE auth_sessions SET revoked_at = NOW() WHERE user_id = ?', [userId]);
-    }
+    },
+
+    async findByPhone(phone: string): Promise<User | null> {
+        const [rows] = await pool.query<RowDataPacket[]>(
+            'SELECT * FROM users WHERE phone = ? AND is_active = 1',
+            [phone]
+        );
+        return (rows[0] as User) || null;
+    },
+
+    async setResetToken(userId: number, hashedToken: string, expires: Date): Promise<void> {
+        await pool.query(
+            'UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE id = ?',
+            [hashedToken, expires, userId]
+        );
+    },
+
+    async findByResetToken(hashedToken: string): Promise<User | null> {
+        const [rows] = await pool.query<RowDataPacket[]>(
+            'SELECT * FROM users WHERE reset_token = ? AND reset_token_expires > NOW()',
+            [hashedToken]
+        );
+        return (rows[0] as User) || null;
+    },
+
+    async clearResetToken(userId: number): Promise<void> {
+        await pool.query(
+            'UPDATE users SET reset_token = NULL, reset_token_expires = NULL WHERE id = ?',
+            [userId]
+        );
+    },
 };

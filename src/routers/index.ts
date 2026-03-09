@@ -9,6 +9,9 @@ import ProfileRoutes from './profile.routes';
 import StoreRoutes from './store.routes';
 import AgentRoutes from './agent.routes';
 import DealerRoutes from './dealer.routes';
+import PaymentRoutes from './payment.routes';
+import AdminRoutes from './admin.routes';
+import UtilsRoutes from './utils.routes';
 
 const router = Router();
 
@@ -22,5 +25,8 @@ router.use('/user', ProfileRoutes);
 router.use('/store', StoreRoutes); // store commerce domain: categories + advanced product listing/detail
 router.use('/agent', AgentRoutes);
 router.use('/dealer', DealerRoutes);
+router.use('/payments', PaymentRoutes);
+router.use('/admin', AdminRoutes);
+router.use('/utils', UtilsRoutes);
 
 export default router;

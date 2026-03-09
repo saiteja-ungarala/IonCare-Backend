@@ -9,8 +9,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.setAddressDefault = exports.deleteAddress = exports.updateAddress = exports.addAddress = exports.getAddresses = exports.updateProfile = exports.getProfile = void 0;
+exports.registerPushToken = exports.setAddressDefault = exports.deleteAddress = exports.updateAddress = exports.addAddress = exports.getAddresses = exports.updateProfile = exports.getProfile = void 0;
 const profile_service_1 = require("../services/profile.service");
+const push_token_model_1 = require("../models/push-token.model");
 const response_1 = require("../utils/response");
 const getProfile = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -92,3 +93,15 @@ const setAddressDefault = (req, res, next) => __awaiter(void 0, void 0, void 0, 
     }
 });
 exports.setAddressDefault = setAddressDefault;
+const registerPushToken = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const userId = req.user.id;
+        const { token, platform } = req.body;
+        yield push_token_model_1.PushTokenModel.upsert(userId, token, platform);
+        return (0, response_1.successResponse)(res, { success: true });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+exports.registerPushToken = registerPushToken;

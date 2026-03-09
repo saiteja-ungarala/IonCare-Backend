@@ -45,4 +45,7 @@ router.post('/refresh', (0, validate_middleware_1.validate)(auth_dto_1.RefreshSc
 router.post('/logout', auth_middleware_1.authenticate, AuthController.logout);
 router.post('/forgot-password', AuthController.forgotPassword);
 router.get('/me', auth_middleware_1.authenticate, AuthController.me);
+router.post('/send-otp', (0, validate_middleware_1.validate)(auth_dto_1.SendOtpSchema), AuthController.sendOtp);
+router.post('/verify-otp', (0, validate_middleware_1.validate)(auth_dto_1.VerifyOtpSchema), AuthController.verifyOtp);
+router.post('/reset-password', (0, validate_middleware_1.validate)(auth_dto_1.ResetPasswordSchema), AuthController.resetPassword);
 exports.default = router;

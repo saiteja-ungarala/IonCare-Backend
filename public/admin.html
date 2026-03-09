@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AquaCare Admin</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f4f8; color: #1a202c; min-height: 100vh; }
+
+  /* ── Login ── */
+  #login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .login-card { background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.1); padding: 40px; width: 360px; }
+  .login-card h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; color: #0d9488; }
+  .login-card p { font-size: 13px; color: #718096; margin-bottom: 28px; }
+  .login-card input { width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; font-size: 14px; margin-bottom: 14px; outline: none; transition: border .2s; }
+  .login-card input:focus { border-color: #0d9488; }
+  .login-card button { width: 100%; background: #0d9488; color: #fff; border: none; border-radius: 8px; padding: 12px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background .2s; }
+  .login-card button:hover { background: #0f766e; }
+  #login-error { color: #e53e3e; font-size: 13px; margin-top: 12px; min-height: 18px; }
+
+  /* ── Dashboard ── */
+  #dashboard { display: none; }
+  header { background: #0d9488; color: #fff; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 18px; font-weight: 700; }
+  header span { font-size: 13px; opacity: .8; }
+  #logout-btn { background: rgba(255,255,255,.2); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #logout-btn:hover { background: rgba(255,255,255,.3); }
+
+  /* ── Tabs ── */
+  .tabs { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 0 24px; display: flex; gap: 4px; }
+  .tab-btn { padding: 14px 20px; font-size: 14px; font-weight: 500; border: none; background: none; cursor: pointer; color: #718096; border-bottom: 3px solid transparent; transition: .2s; }
+  .tab-btn:hover { color: #0d9488; }
+  .tab-btn.active { color: #0d9488; border-bottom-color: #0d9488; }
+
+  /* ── Content ── */
+  #tab-content { padding: 24px; max-width: 960px; margin: 0 auto; }
+  .section-title { font-size: 16px; font-weight: 600; color: #2d3748; margin-bottom: 16px; }
+  .empty-state { text-align: center; color: #a0aec0; padding: 48px 0; font-size: 14px; }
+  .loading { text-align: center; color: #a0aec0; padding: 32px 0; font-size: 14px; }
+
+  /* ── KYC Card ── */
+  .kyc-card { background: #fff; border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.07); padding: 20px; margin-bottom: 16px; }
+  .kyc-card-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+  .kyc-info h3 { font-size: 16px; font-weight: 600; color: #1a202c; }
+  .kyc-info p { font-size: 13px; color: #718096; margin-top: 3px; }
+  .kyc-status { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 12px; }
+  .kyc-status.pending  { background: #fef3c7; color: #92400e; }
+  .kyc-status.approved { background: #d1fae5; color: #065f46; }
+  .kyc-status.rejected { background: #fee2e2; color: #991b1b; }
+
+  .docs-list { margin: 14px 0 16px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .doc-link { display: inline-block; font-size: 12px; background: #ebf8ff; color: #2b6cb0; padding: 4px 10px; border-radius: 6px; text-decoration: none; }
+  .doc-link:hover { background: #bee3f8; }
+  .no-docs { font-size: 13px; color: #a0aec0; margin: 12px 0; }
+
+  .action-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .btn-approve { background: #38a169; color: #fff; border: none; border-radius: 7px; padding: 8px 18px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background .2s; }
+  .btn-approve:hover { background: #2f855a; }
+  .btn-reject  { background: #e53e3e; color: #fff; border: none; border-radius: 7px; padding: 8px 18px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background .2s; }
+  .btn-reject:hover  { background: #c53030; }
+  .btn-approve:disabled, .btn-reject:disabled { opacity: .5; cursor: not-allowed; }
+
+  .reject-form { margin-top: 14px; display: none; }
+  .reject-form textarea { width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; font-size: 13px; resize: vertical; min-height: 72px; outline: none; }
+  .reject-form textarea:focus { border-color: #e53e3e; }
+  .reject-form .reject-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .btn-confirm-reject { background: #e53e3e; color: #fff; border: none; border-radius: 7px; padding: 7px 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .btn-cancel-reject  { background: #edf2f7; color: #4a5568; border: none; border-radius: 7px; padding: 7px 16px; font-size: 13px; cursor: pointer; }
+
+  /* ── Users Table ── */
+  .users-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,.07); }
+  .users-table th { background: #f7fafc; text-align: left; padding: 12px 16px; font-size: 12px; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid #e2e8f0; }
+  .users-table td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid #f0f4f8; }
+  .users-table tr:last-child td { border-bottom: none; }
+  .role-badge { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 10px; }
+  .role-badge.customer { background: #ebf8ff; color: #2b6cb0; }
+  .role-badge.agent    { background: #fefcbf; color: #744210; }
+  .role-badge.dealer   { background: #e9d8fd; color: #553c9a; }
+  .role-badge.admin    { background: #fed7d7; color: #822727; }
+  .pagination { display: flex; gap: 8px; align-items: center; margin-top: 16px; justify-content: flex-end; font-size: 13px; color: #718096; }
+  .pagination button { background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 13px; }
+  .pagination button:hover { background: #f7fafc; }
+  .pagination button:disabled { opacity: .4; cursor: not-allowed; }
+  .filter-row { display: flex; gap: 10px; margin-bottom: 16px; align-items: center; }
+  .filter-row select { border: 1px solid #e2e8f0; border-radius: 7px; padding: 7px 12px; font-size: 13px; outline: none; }
+
+  /* ── Toast ── */
+  #toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; color: #fff; display: none; z-index: 9999; box-shadow: 0 4px 14px rgba(0,0,0,.15); }
+  #toast.success { background: #38a169; }
+  #toast.error   { background: #e53e3e; }
+</style>
+</head>
+<body>
+
+<!-- ── Login ─────────────────────────────────────────────────────────────── -->
+<div id="login-screen">
+  <div class="login-card">
+    <h1>AquaCare Admin</h1>
+    <p>Sign in with your admin account</p>
+    <form id="login-form">
+      <input type="email"    id="login-email"    placeholder="Email address" required>
+      <input type="password" id="login-password" placeholder="Password"      required>
+      <button type="submit" id="login-btn">Sign In</button>
+      <div id="login-error"></div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Dashboard ─────────────────────────────────────────────────────────── -->
+<div id="dashboard">
+  <header>
+    <h1>AquaCare Admin Panel</h1>
+    <div style="display:flex;align-items:center;gap:16px;">
+      <span id="admin-name"></span>
+      <button id="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="agents"  onclick="switchTab('agents')">Pending Agents</button>
+    <button class="tab-btn"        data-tab="dealers" onclick="switchTab('dealers')">Pending Dealers</button>
+    <button class="tab-btn"        data-tab="users"   onclick="switchTab('users')">All Users</button>
+  </div>
+
+  <div id="tab-content"></div>
+</div>
+
+<!-- ── Toast ─────────────────────────────────────────────────────────────── -->
+<div id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let authToken  = null;
+let currentTab = 'agents';
+let usersPage  = 1;
+let usersRole  = '';
+
+const BASE = '/api';
+
+// ── Utility ────────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: 'Bearer ' + authToken } : {}) },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(BASE + path, opts);
+  return { ok: res.ok, status: res.status, data: await res.json() };
+}
+
+function showToast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className   = type;
+  el.style.display = 'block';
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+// ── Login ──────────────────────────────────────────────────────────────────
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('login-error');
+  const btn   = document.getElementById('login-btn');
+  errEl.textContent = '';
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+
+  try {
+    const email    = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    const { ok, data } = await api('POST', '/auth/login', { email, password });
+
+    if (!ok) {
+      errEl.textContent = data.message || 'Login failed';
+      return;
+    }
+
+    if (data.data?.user?.role !== 'admin') {
+      errEl.textContent = 'Not an admin account';
+      return;
+    }
+
+    authToken = data.data.accessToken;
+    document.getElementById('admin-name').textContent = data.data.user.full_name || email;
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('dashboard').style.display    = 'block';
+    switchTab('agents');
+  } catch (err) {
+    errEl.textContent = 'Network error. Is the server running?';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  }
+});
+
+function logout() {
+  authToken = null;
+  document.getElementById('dashboard').style.display    = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-email').value    = '';
+  document.getElementById('login-password').value = '';
+  document.getElementById('login-error').textContent = '';
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  if (tab === 'agents')  loadKycTab('agents');
+  if (tab === 'dealers') loadKycTab('dealers');
+  if (tab === 'users')   loadUsersTab();
+}
+
+// ── KYC Tab ────────────────────────────────────────────────────────────────
+async function loadKycTab(type) {
+  const el = document.getElementById('tab-content');
+  const label = type === 'agents' ? 'Agent' : 'Dealer';
+  el.innerHTML = `<div class="loading">Loading ${label} KYC…</div>`;
+
+  try {
+    const { ok, data } = await api('GET', `/admin/kyc/${type}?status=pending`);
+    if (!ok) { el.innerHTML = `<div class="empty-state">Error loading data</div>`; return; }
+
+    const list = data.data || [];
+    if (list.length === 0) {
+      el.innerHTML = `<p class="section-title">Pending ${label} KYC</p><div class="empty-state">No pending ${label} KYC submissions.</div>`;
+      return;
+    }
+
+    el.innerHTML = `<p class="section-title">Pending ${label} KYC (${list.length})</p>` +
+      list.map((item) => renderKycCard(item, type)).join('');
+
+    // Bind reject toggle buttons
+    el.querySelectorAll('.btn-reject').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const form = document.getElementById('reject-form-' + btn.dataset.id);
+        form.style.display = form.style.display === 'none' ? 'block' : 'none';
+      });
+    });
+
+    // Bind approve buttons
+    el.querySelectorAll('.btn-approve').forEach((btn) => {
+      btn.addEventListener('click', () => handleApprove(type, btn.dataset.id, btn));
+    });
+
+    // Bind confirm-reject buttons
+    el.querySelectorAll('.btn-confirm-reject').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const notes = document.getElementById('reject-notes-' + btn.dataset.id).value.trim();
+        handleReject(type, btn.dataset.id, notes, btn);
+      });
+    });
+
+    // Bind cancel-reject buttons
+    el.querySelectorAll('.btn-cancel-reject').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.getElementById('reject-form-' + btn.dataset.id).style.display = 'none';
+      });
+    });
+  } catch (err) {
+    el.innerHTML = `<div class="empty-state">Network error</div>`;
+  }
+}
+
+function renderKycCard(item, type) {
+  const docsHtml = item.documents && item.documents.length > 0
+    ? `<div class="docs-list">${item.documents.map((d) =>
+        `<a class="doc-link" href="${d.fileUrl}" target="_blank" rel="noopener">${d.docType || 'Document'}</a>`
+      ).join('')}</div>`
+    : `<p class="no-docs">No documents uploaded</p>`;
+
+  return `
+    <div class="kyc-card">
+      <div class="kyc-card-header">
+        <div class="kyc-info">
+          <h3>${esc(item.fullName)}</h3>
+          <p>${esc(item.email)} &nbsp;·&nbsp; ${esc(item.phone || '—')}</p>
+        </div>
+        <span class="kyc-status ${item.verificationStatus}">${item.verificationStatus}</span>
+      </div>
+      ${docsHtml}
+      <div class="action-row">
+        <button class="btn-approve" data-id="${item.userId}">Approve</button>
+        <button class="btn-reject"  data-id="${item.userId}">Reject</button>
+      </div>
+      <div class="reject-form" id="reject-form-${item.userId}">
+        <textarea id="reject-notes-${item.userId}" placeholder="Reason for rejection (required)…"></textarea>
+        <div class="reject-actions">
+          <button class="btn-confirm-reject" data-id="${item.userId}">Confirm Reject</button>
+          <button class="btn-cancel-reject"  data-id="${item.userId}">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function handleApprove(type, userId, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Approving…';
+  const idParam = type === 'agents' ? 'agentId' : 'dealerId';
+  const singular = type === 'agents' ? 'agents' : 'dealers';
+  try {
+    const { ok, data } = await api('POST', `/admin/kyc/${singular}/${userId}/approve`, {});
+    if (ok) {
+      showToast('KYC approved successfully', 'success');
+      loadKycTab(type);
+    } else {
+      showToast(data.message || 'Approval failed', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Approve';
+    }
+  } catch {
+    showToast('Network error', 'error');
+    btn.disabled = false;
+    btn.textContent = 'Approve';
+  }
+}
+
+async function handleReject(type, userId, notes, btn) {
+  if (!notes) { showToast('Review notes are required', 'error'); return; }
+  btn.disabled = true;
+  btn.textContent = 'Rejecting…';
+  const singular = type === 'agents' ? 'agents' : 'dealers';
+  try {
+    const { ok, data } = await api('POST', `/admin/kyc/${singular}/${userId}/reject`, { review_notes: notes });
+    if (ok) {
+      showToast('KYC rejected', 'success');
+      loadKycTab(type);
+    } else {
+      showToast(data.message || 'Rejection failed', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Confirm Reject';
+    }
+  } catch {
+    showToast('Network error', 'error');
+    btn.disabled = false;
+    btn.textContent = 'Confirm Reject';
+  }
+}
+
+// ── Users Tab ──────────────────────────────────────────────────────────────
+async function loadUsersTab() {
+  const el = document.getElementById('tab-content');
+  el.innerHTML = `<div class="loading">Loading users…</div>`;
+
+  try {
+    const roleParam = usersRole ? `&role=${usersRole}` : '';
+    const { ok, data } = await api('GET', `/admin/users?page=${usersPage}&limit=20${roleParam}`);
+    if (!ok) { el.innerHTML = `<div class="empty-state">Error loading users</div>`; return; }
+
+    const { users, pagination } = data.data;
+
+    const filterHtml = `
+      <div class="filter-row">
+        <label style="font-size:13px;color:#4a5568;">Filter by role:</label>
+        <select id="role-filter" onchange="changeRoleFilter(this.value)">
+          <option value=""       ${!usersRole        ? 'selected' : ''}>All roles</option>
+          <option value="customer" ${usersRole==='customer' ? 'selected' : ''}>Customer</option>
+          <option value="agent"    ${usersRole==='agent'    ? 'selected' : ''}>Agent</option>
+          <option value="dealer"   ${usersRole==='dealer'   ? 'selected' : ''}>Dealer</option>
+          <option value="admin"    ${usersRole==='admin'    ? 'selected' : ''}>Admin</option>
+        </select>
+        <span style="font-size:13px;color:#718096;">${pagination.totalItems} total</span>
+      </div>`;
+
+    const tableHtml = users.length === 0
+      ? `<div class="empty-state">No users found</div>`
+      : `<table class="users-table">
+          <thead><tr>
+            <th>ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Active</th><th>Joined</th>
+          </tr></thead>
+          <tbody>${users.map((u) => `
+            <tr>
+              <td>${u.id}</td>
+              <td>${esc(u.full_name)}</td>
+              <td>${esc(u.email)}</td>
+              <td>${esc(u.phone || '—')}</td>
+              <td><span class="role-badge ${u.role}">${u.role}</span></td>
+              <td>${u.is_active ? '✓' : '✗'}</td>
+              <td>${new Date(u.created_at).toLocaleDateString()}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+
+    const paginationHtml = `
+      <div class="pagination">
+        <button onclick="changeUsersPage(${usersPage - 1})" ${usersPage <= 1 ? 'disabled' : ''}>← Prev</button>
+        <span>Page ${pagination.page} of ${pagination.totalPages || 1}</span>
+        <button onclick="changeUsersPage(${usersPage + 1})" ${usersPage >= pagination.totalPages ? 'disabled' : ''}>Next →</button>
+      </div>`;
+
+    el.innerHTML = `<p class="section-title">All Users</p>${filterHtml}${tableHtml}${paginationHtml}`;
+  } catch {
+    el.innerHTML = `<div class="empty-state">Network error</div>`;
+  }
+}
+
+function changeRoleFilter(role) {
+  usersRole = role;
+  usersPage = 1;
+  loadUsersTab();
+}
+
+function changeUsersPage(page) {
+  usersPage = page;
+  loadUsersTab();
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function esc(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>

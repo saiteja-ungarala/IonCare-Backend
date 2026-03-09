@@ -28,4 +28,11 @@ export const env = {
     JWT_ACCESS_EXPIRY: getRequiredEnv('JWT_ACCESS_EXPIRY'),
     JWT_REFRESH_EXPIRY: getRequiredEnv('JWT_REFRESH_EXPIRY'),
     NODE_ENV: process.env.NODE_ENV ?? 'production',
+    RAZORPAY_KEY_ID: getRequiredEnv('RAZORPAY_KEY_ID'),
+    RAZORPAY_KEY_SECRET: getRequiredEnv('RAZORPAY_KEY_SECRET'),
+    RAZORPAY_WEBHOOK_SECRET: getRequiredEnv('RAZORPAY_WEBHOOK_SECRET'),
+    FAST2SMS_API_KEY: getRequiredEnv('FAST2SMS_API_KEY'),
+    SENDGRID_API_KEY: getRequiredEnv('SENDGRID_API_KEY'),
+    FROM_EMAIL: getRequiredEnv('FROM_EMAIL'),
+    GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY ?? '',
 };

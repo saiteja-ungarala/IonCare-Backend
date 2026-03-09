@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+export const PushTokenSchema = z.object({
+    body: z.object({
+        token: z.string().min(1, 'token is required'),
+        platform: z.enum(['ios', 'android', 'web']),
+    }),
+});
+
 export const AddressSchema = z.object({
     body: z.object({
         label: z.string().optional(),

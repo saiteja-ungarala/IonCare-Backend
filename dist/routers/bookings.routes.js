@@ -43,4 +43,5 @@ router.use(auth_middleware_1.authenticate);
 router.get('/', BookingController.getBookings);
 router.post('/', (0, validate_middleware_1.validate)(booking_dto_1.CreateBookingSchema), BookingController.createBooking);
 router.patch('/:id/cancel', BookingController.cancelBooking);
+router.get('/:bookingId/updates', BookingController.getBookingUpdates);
 exports.default = router;

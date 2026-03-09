@@ -43,6 +43,7 @@ app.use(express_1.default.json());
 app.use(express_1.default.urlencoded({ extended: true }));
 // Static files (login page, etc.)
 app.use(express_1.default.static(path_1.default.join(__dirname, '../public')));
+app.use('/admin', express_1.default.static(path_1.default.join(__dirname, '../public')));
 app.use('/uploads', express_1.default.static(path_1.default.join(__dirname, '../uploads')));
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));

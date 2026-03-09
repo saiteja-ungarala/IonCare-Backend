@@ -73,14 +73,40 @@ export const me = async (req: Request, res: Response, next: NextFunction) => {
     }
 };
 
-export const forgotPassword = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        const { email } = req.body;
-        // Log the request for future email integration
-        console.log(`[Auth] Password reset requested for: ${email}`);
+export const forgotPassword = async (req: Request, res: Response, _next: NextFunction) => {
+    const { email } = req.body;
+    // Fire-and-forget — never await, never reveal if email exists
+    AuthService.initiateForgotPassword(email).catch((err) =>
+        console.error('[Auth] forgotPassword error:', err)
+    );
+    return successResponse(res, null, 'If that email exists a reset link was sent');
+};
 
-        // Always return success for security (don't leak which emails exist)
-        return successResponse(res, null, 'If this email exists, we sent reset instructions.');
+export const resetPassword = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { token, newPassword } = req.body;
+        await AuthService.resetPassword(token, newPassword);
+        return successResponse(res, null, 'Password reset successfully');
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const sendOtp = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { phone } = req.body;
+        await AuthService.sendOTP(phone);
+        return successResponse(res, null, 'OTP sent');
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { phone, otp } = req.body;
+        const result = await AuthService.loginWithOTP(phone, otp);
+        return successResponse(res, result, 'Login successful');
     } catch (error) {
         next(error);
     }

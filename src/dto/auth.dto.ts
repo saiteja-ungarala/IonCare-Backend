@@ -23,3 +23,23 @@ export const RefreshSchema = z.object({
         refreshToken: z.string(),
     }),
 });
+
+export const SendOtpSchema = z.object({
+    body: z.object({
+        phone: z.string().regex(/^\d{10}$/, 'Phone number must be exactly 10 digits'),
+    }),
+});
+
+export const VerifyOtpSchema = z.object({
+    body: z.object({
+        phone: z.string().regex(/^\d{10}$/, 'Phone number must be exactly 10 digits'),
+        otp: z.string().regex(/^\d{6}$/, 'OTP must be exactly 6 digits'),
+    }),
+});
+
+export const ResetPasswordSchema = z.object({
+    body: z.object({
+        token: z.string().min(1),
+        newPassword: z.string().min(8, 'Password must be at least 8 characters'),
+    }),
+});

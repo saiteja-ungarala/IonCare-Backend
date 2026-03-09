@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cancelBooking = exports.createBooking = exports.getBookings = void 0;
+exports.getBookingUpdates = exports.cancelBooking = exports.createBooking = exports.getBookings = void 0;
 const bookings_service_1 = require("../services/bookings.service");
 const response_1 = require("../utils/response");
 const getBookings = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
@@ -46,3 +46,15 @@ const cancelBooking = (req, res, next) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.cancelBooking = cancelBooking;
+const getBookingUpdates = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const userId = req.user.id;
+        const bookingId = Number(req.params.bookingId);
+        const updates = yield bookings_service_1.BookingService.getBookingUpdates(userId, bookingId);
+        return (0, response_1.successResponse)(res, updates);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+exports.getBookingUpdates = getBookingUpdates;

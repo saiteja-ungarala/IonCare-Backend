@@ -1,6 +1,10 @@
 import pool from '../config/db';
 import { BOOKING_STATUS } from '../config/constants';
 import { AgentModel } from '../models/agent.model';
+import { UserModel } from '../models/user.model';
+import { BookingUpdateModel } from '../models/booking-update.model';
+import { EmailService } from './email.service';
+import { NotificationService } from './notification.service';
 import { ReferralCommissionService } from './referralCommission.service';
 
 const KYC_DOC_TYPE_ALIASES: Record<string, 'aadhaar' | 'pan' | 'driving_license' | 'selfie' | 'other'> = {
@@ -77,6 +81,15 @@ export const AgentService = {
         return ReferralCommissionService.getCampaignProgress(agentId, campaignId);
     },
 
+    async updateLocation(agentId: number, lat: number, lng: number) {
+        await AgentModel.ensureProfile(agentId);
+        await pool.query(
+            'UPDATE agent_profiles SET base_lat = ?, base_lng = ? WHERE user_id = ?',
+            [lat, lng, agentId]
+        );
+        return { success: true };
+    },
+
     async submitKyc(agentId: number, payload: { docType?: string; fileUrls: string[] }) {
         await AgentModel.ensureProfile(agentId);
 
@@ -109,6 +122,10 @@ export const AgentService = {
 
         if (profile.verification_status !== 'approved') {
             throw { type: 'AppError', message: 'Agent is not approved for going online', statusCode: 403 };
+        }
+
+        if (isOnline && profile.base_lat === null) {
+            throw { type: 'AppError', message: 'Please enable location before going online', statusCode: 400, code: 'LOCATION_REQUIRED' };
         }
 
         await AgentModel.setOnline(agentId, isOnline);
@@ -222,6 +239,22 @@ export const AgentService = {
 
             await connection.commit();
 
+            // Fire-and-forget: notify customer that agent has been assigned
+            const customerUserId = bookingRows[0].user_id;
+            Promise.all([
+                UserModel.findById(customerUserId),
+                AgentModel.getProfile(agentId),
+            ]).then(([customer, agentProfile]) => {
+                const agentName = agentProfile?.full_name ?? 'Your technician';
+                if (customer?.email) {
+                    EmailService.sendBookingAssigned(customer.email, {
+                        bookingId,
+                        agentName,
+                    });
+                }
+                NotificationService.sendToUser(customerUserId, 'Technician Assigned', `${agentName} is on the way`, { type: 'agent_assigned', bookingId });
+            }).catch((err) => console.error('[AgentService] acceptJob notification error:', err));
+
             return { booking_id: bookingId, status: BOOKING_STATUS.ASSIGNED, agent_id: agentId };
         } catch (error) {
             await connection.rollback();
@@ -263,6 +296,55 @@ export const AgentService = {
         return { booking_id: bookingId, status: 'rejected' };
     },
 
+    async postJobUpdate(agentId: number, bookingId: number, data: { update_type: string; note?: string; media_url?: string }) {
+        const [bookingRows] = await pool.query<any[]>(
+            'SELECT id, user_id, agent_id, status, price FROM bookings WHERE id = ?',
+            [bookingId]
+        );
+
+        if (bookingRows.length === 0) {
+            throw { type: 'AppError', message: 'Booking not found', statusCode: 404 };
+        }
+
+        const booking = bookingRows[0];
+        if (Number(booking.agent_id) !== agentId) {
+            throw { type: 'AppError', message: 'You are not assigned to this booking', statusCode: 403 };
+        }
+
+        const updateId = await BookingUpdateModel.create({
+            booking_id: bookingId,
+            agent_id: agentId,
+            update_type: data.update_type as 'arrived' | 'diagnosed' | 'in_progress' | 'completed' | 'photo' | 'note',
+            note: data.note || null,
+            media_url: data.media_url || null,
+        });
+
+        if (data.update_type === 'arrived') {
+            // Fire-and-forget: notify customer technician has arrived
+            NotificationService.sendToUser(Number(booking.user_id), 'Technician Arrived', 'Your technician is here', { type: 'booking_update', bookingId });
+        }
+
+        if (data.update_type === 'completed') {
+            await pool.query(
+                'UPDATE bookings SET status = ?, completed_at = NOW() WHERE id = ?',
+                [BOOKING_STATUS.COMPLETED, bookingId]
+            );
+
+            // Fire-and-forget: notify customer booking is completed
+            UserModel.findById(Number(booking.user_id)).then((customer) => {
+                if (customer?.email) {
+                    EmailService.sendBookingCompleted(customer.email, {
+                        bookingId,
+                        amount: Number(booking.price ?? 0),
+                    });
+                }
+                NotificationService.sendToUser(Number(booking.user_id), 'Service Complete', 'Please rate your experience', { type: 'booking_completed', bookingId });
+            }).catch((err) => console.error('[AgentService] postJobUpdate notification error:', err));
+        }
+
+        return { success: true, update_id: updateId };
+    },
+
     async updateJobStatus(agentId: number, bookingId: number, status: string) {
         const [rows] = await pool.query<any[]>(
             `SELECT id, agent_id, status
@@ -295,6 +377,18 @@ export const AgentService = {
              WHERE id = ? AND agent_id = ?`,
             [status, bookingId, agentId]
         );
+
+        // Fire-and-forget: notify customer when booking is completed
+        if (status === BOOKING_STATUS.COMPLETED) {
+            UserModel.findById(Number(booking.user_id)).then((customer) => {
+                if (customer?.email) {
+                    EmailService.sendBookingCompleted(customer.email, {
+                        bookingId,
+                        amount: Number(booking.price ?? 0),
+                    });
+                }
+            }).catch((err) => console.error('[AgentService] updateJobStatus email error:', err));
+        }
 
         return { booking_id: bookingId, status };
     },

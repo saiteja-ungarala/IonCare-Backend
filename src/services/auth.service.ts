@@ -1,7 +1,12 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes, createHash } from 'crypto';
 import { UserModel, User } from '../models/user.model';
+import { WalletModel } from '../models/wallet.model';
+import { UserBenefitModel } from '../models/user-benefit.model';
+import { OtpModel } from '../models/otp.model';
+import { SmsService } from './sms.service';
+import { EmailService } from './email.service';
 import { env } from '../config/env';
 
 export const AuthService = {
@@ -13,6 +18,21 @@ export const AuthService = {
 
         const hashedPassword = await bcrypt.hash(data.password_hash, 10);
         const userId = await UserModel.create({ ...data, password_hash: hashedPassword });
+
+        // Wallet setup + welcome bonus
+        await WalletModel.createWallet(userId);
+        await WalletModel.creditWithIdempotency(userId, {
+            amount: 1000,
+            txn_type: 'credit',
+            source: 'welcome_bonus',
+            idempotency_key: `welcome:${userId}`,
+        });
+
+        // First Service Free benefit for new customers
+        if (data.role === 'customer') {
+            await UserBenefitModel.create(userId, 'FIRST_SERVICE_FREE');
+        }
+
         const user = await UserModel.findById(userId);
 
         const tokens = await this.generateTokens(user!);
@@ -88,5 +108,88 @@ export const AuthService = {
     sanitizeUser(user: User) {
         const { password_hash, ...rest } = user;
         return rest;
+    },
+
+    async sendOTP(phone: string): Promise<void> {
+        if (!/^\d{10}$/.test(phone)) {
+            throw { type: 'AppError', message: 'Phone number must be exactly 10 digits', statusCode: 400 };
+        }
+
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpHash = await bcrypt.hash(otp, 10);
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+        await OtpModel.create(phone, otpHash, expiresAt);
+        await SmsService.sendOTP(phone, otp);
+        // OTP is never logged or returned
+    },
+
+    async verifyOTP(phone: string, otp: string): Promise<boolean> {
+        const record = await OtpModel.findLatestByPhone(phone);
+
+        if (!record || record.verified) {
+            throw { type: 'AppError', message: 'OTP not found. Request a new one.', statusCode: 400 };
+        }
+
+        if (record.expires_at < new Date()) {
+            throw { type: 'AppError', message: 'OTP expired. Request a new one.', statusCode: 400 };
+        }
+
+        if (record.attempts >= 5) {
+            throw { type: 'AppError', message: 'Too many attempts. Request new OTP.', statusCode: 429 };
+        }
+
+        const isMatch = await bcrypt.compare(otp, record.otp_hash);
+
+        if (!isMatch) {
+            await OtpModel.incrementAttempts(record.id);
+            return false;
+        }
+
+        await OtpModel.markVerified(record.id);
+        return true;
+    },
+
+    async initiateForgotPassword(email: string): Promise<void> {
+        const user = await UserModel.findByEmail(email);
+        if (!user || !user.id) return; // silently do nothing if not found
+
+        const token = randomBytes(32).toString('hex');
+        const hashedToken = createHash('sha256').update(token).digest('hex');
+        const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+        await UserModel.setResetToken(user.id, hashedToken, expires);
+
+        const resetLink = `${env.BASE_SERVER_URL}/reset-password?token=${token}`;
+        EmailService.sendPasswordReset(email, resetLink); // fire-and-forget
+    },
+
+    async resetPassword(token: string, newPassword: string): Promise<void> {
+        const hashedToken = createHash('sha256').update(token).digest('hex');
+        const user = await UserModel.findByResetToken(hashedToken);
+
+        if (!user || !user.id) {
+            throw { type: 'AppError', message: 'Invalid or expired reset link', statusCode: 400 };
+        }
+
+        const newHash = await bcrypt.hash(newPassword, 10);
+        await UserModel.update(user.id, { password_hash: newHash });
+        await UserModel.clearResetToken(user.id);
+    },
+
+    async loginWithOTP(phone: string, otp: string): Promise<any> {
+        const isValid = await this.verifyOTP(phone, otp);
+
+        if (!isValid) {
+            throw { type: 'AppError', message: 'Invalid OTP', statusCode: 400 };
+        }
+
+        const user = await UserModel.findByPhone(phone);
+        if (!user) {
+            throw { type: 'AppError', message: 'No account found for this phone number', statusCode: 404 };
+        }
+
+        const tokens = await this.generateTokens(user);
+        return { user: this.sanitizeUser(user), ...tokens };
     },
 };

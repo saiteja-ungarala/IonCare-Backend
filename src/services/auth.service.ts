@@ -39,7 +39,7 @@ export const AuthService = {
         return { user: this.sanitizeUser(user!), ...tokens };
     },
 
-    async login(email: string, password: string, role?: 'customer' | 'agent' | 'dealer'): Promise<any> {
+    async login(email: string, password: string, role: 'customer' | 'agent' | 'dealer'): Promise<any> {
         const user = await UserModel.findByEmail(email);
 
         // User not found - return 404
@@ -47,8 +47,12 @@ export const AuthService = {
             throw { type: 'AppError', message: 'User not found', statusCode: 404 };
         }
 
-        // Enforce selected role login. If mismatch, do not allow cross-role login.
-        if (role && user.role !== role) {
+        // Enforce selected role login. Admin is allowed only through agent entry.
+        const roleAllowed =
+            role === 'agent'
+                ? user.role === 'agent' || user.role === 'admin'
+                : user.role === role;
+        if (!roleAllowed) {
             throw { type: 'AppError', message: 'Credentials not found', statusCode: 404 };
         }
 

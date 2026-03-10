@@ -5,6 +5,7 @@ import { BookingUpdateModel } from '../models/booking-update.model';
 import { ServiceModel } from '../models/service.model';
 import { AddressModel } from '../models/address.model';
 import { UserModel } from '../models/user.model';
+import { WalletModel } from '../models/wallet.model';
 import { EmailService } from './email.service';
 import { NotificationService } from './notification.service';
 import { BOOKING_STATUS } from '../config/constants';
@@ -124,14 +125,50 @@ export const BookingService = {
         return BookingUpdateModel.findByBookingId(bookingId);
     },
 
-    async cancelBooking(userId: number, bookingId: number) {
-        const booking = await BookingModel.findById(bookingId);
-        if (!booking) throw { type: 'AppError', message: 'Booking not found', statusCode: 404 };
-        if (booking.user_id !== userId) throw { type: 'AppError', message: 'Unauthorized', statusCode: 403 };
-        if (booking.status !== 'pending' && booking.status !== 'confirmed') {
-            throw { type: 'AppError', message: 'Cannot cancel booking in current status', statusCode: 400 };
+    async cancelBooking(userId: number, bookingId: number, reason: string) {
+        if (!reason?.trim()) {
+            throw { type: 'AppError', message: 'Cancellation reason is required', statusCode: 400 };
         }
 
-        await BookingModel.updateStatus(bookingId, 'cancelled');
+        const booking = await BookingModel.findById(bookingId);
+        if (!booking) throw { type: 'AppError', message: 'Booking not found', statusCode: 404 };
+        if (Number(booking.user_id) !== userId) throw { type: 'AppError', message: 'Forbidden', statusCode: 403 };
+        if (booking.status !== 'pending' && booking.status !== 'confirmed') {
+            throw { type: 'AppError', message: 'Cannot cancel a booking that is already assigned/in_progress/completed/cancelled', statusCode: 400 };
+        }
+
+        // Cancel the booking and record the reason
+        await pool.query(
+            `UPDATE bookings
+             SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, cancelled_at = NOW()
+             WHERE id = ?`,
+            [reason.trim(), userId, bookingId]
+        );
+
+        // Refund if a paid Razorpay payment exists for this booking
+        let refunded = false;
+        let refundAmount = 0;
+        const [payRows] = await pool.query<RowDataPacket[]>(
+            `SELECT id, amount FROM payments
+             WHERE entity_type = 'booking' AND entity_id = ? AND status = 'paid'
+             LIMIT 1`,
+            [bookingId]
+        );
+        if (payRows.length > 0) {
+            refundAmount = Number(payRows[0].amount);
+            await pool.query(
+                `UPDATE payments SET status = 'refunded' WHERE id = ?`,
+                [payRows[0].id]
+            );
+            await WalletModel.creditWithIdempotency(userId, {
+                amount: refundAmount,
+                txn_type: 'credit',
+                source: 'refund',
+                idempotency_key: `booking_cancel:${bookingId}`,
+            });
+            refunded = true;
+        }
+
+        return { success: true, refunded, refund_amount: refundAmount };
     }
 };

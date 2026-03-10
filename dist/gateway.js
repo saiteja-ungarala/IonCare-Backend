@@ -11,6 +11,7 @@ const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const routers_1 = __importDefault(require("./routers"));
 const error_middleware_1 = require("./middlewares/error.middleware");
 const app = (0, express_1.default)();
+app.set('trust proxy', 1);
 const ALLOWED = (process.env.ALLOWED_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean);
 const createPostRateLimiter = (windowMs, max, message) => (0, express_rate_limit_1.default)({
     windowMs,

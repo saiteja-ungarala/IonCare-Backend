@@ -32,3 +32,15 @@ export const checkout = async (req: Request, res: Response, next: NextFunction) 
         next(error);
     }
 };
+
+export const cancelOrder = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = (req.user as any).id;
+        const orderId = Number(req.params.id);
+        const { reason } = req.body;
+        const result = await OrderService.cancelOrder(userId, orderId, reason);
+        return successResponse(res, result, 'Order cancelled');
+    } catch (error) {
+        next(error);
+    }
+};

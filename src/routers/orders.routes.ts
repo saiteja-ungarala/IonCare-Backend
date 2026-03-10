@@ -9,7 +9,8 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', OrderController.getOrders);
-router.get('/:id', OrderController.getOrderById);
 router.post('/checkout', validate(CheckoutSchema), OrderController.checkout);
+router.post('/:id/cancel', OrderController.cancelOrder);
+router.get('/:id', OrderController.getOrderById);
 
 export default router;

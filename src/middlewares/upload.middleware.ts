@@ -27,3 +27,4 @@ const createDiskUpload = (relativeFolder: string) => {
 
 export const kycUpload = createDiskUpload('agent-kyc');
 export const dealerKycUpload = createDiskUpload('dealer-kyc');
+export const bannerUpload = createDiskUpload('banners');

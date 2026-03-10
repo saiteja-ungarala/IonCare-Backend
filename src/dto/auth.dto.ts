@@ -14,7 +14,7 @@ export const LoginSchema = z.object({
     body: z.object({
         email: z.string().email(),
         password: z.string(),
-        role: z.enum(['customer', 'agent', 'dealer']).optional(),
+        role: z.enum(['customer', 'agent', 'dealer']),
     }),
 });
 

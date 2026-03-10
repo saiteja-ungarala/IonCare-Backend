@@ -26,8 +26,9 @@ export const cancelBooking = async (req: Request, res: Response, next: NextFunct
     try {
         const userId = (req.user as any).id;
         const bookingId = Number(req.params.id);
-        await BookingService.cancelBooking(userId, bookingId);
-        return successResponse(res, null, 'Booking cancelled');
+        const { reason } = req.body;
+        const result = await BookingService.cancelBooking(userId, bookingId, reason);
+        return successResponse(res, result, 'Booking cancelled');
     } catch (error) {
         next(error);
     }

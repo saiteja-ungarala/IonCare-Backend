@@ -101,6 +101,43 @@ export const OrderService = {
         return mapOrderDetail(order);
     },
 
+    async cancelOrder(userId: number, orderId: number, reason: string) {
+        if (!reason?.trim()) {
+            throw { type: 'AppError', message: 'Cancellation reason is required', statusCode: 400 };
+        }
+
+        const order = await OrderModel.findById(orderId);
+        if (!order) throw { type: 'AppError', message: 'Order not found', statusCode: 404 };
+        if (Number(order.user_id) !== userId) throw { type: 'AppError', message: 'Forbidden', statusCode: 403 };
+        if (order.status !== 'pending' && order.status !== 'paid') {
+            throw { type: 'AppError', message: 'Cannot cancel an order that is already packed/shipped/delivered/cancelled', statusCode: 400 };
+        }
+
+        // Cancel the order and record reason
+        await pool.query(
+            `UPDATE orders
+             SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, cancelled_at = NOW()
+             WHERE id = ?`,
+            [reason.trim(), userId, orderId]
+        );
+
+        // Refund to wallet if the order was already paid
+        let refunded = false;
+        let refundAmount = 0;
+        if (order.payment_status === 'paid') {
+            refundAmount = Number(order.total_amount);
+            await WalletModel.creditWithIdempotency(userId, {
+                amount: refundAmount,
+                txn_type: 'credit',
+                source: 'refund',
+                idempotency_key: `order_cancel:${orderId}`,
+            });
+            refunded = true;
+        }
+
+        return { success: true, refunded, refund_amount: refundAmount };
+    },
+
     async checkout(userId: number, data: { address_id: number; payment_method: string; referral_code?: string }) {
         // 1. Validate Address
         const address = await AddressModel.findById(data.address_id);

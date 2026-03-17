@@ -1,0 +1,19 @@
+# Never include secrets or dev artifacts in the image
+.env
+.env.*
+!.env.example
+
+node_modules
+dist
+
+uploads
+*.log
+
+.git
+.gitignore
+README.md
+*.md
+*.txt
+test-*.js
+patch-*.js
+migrations

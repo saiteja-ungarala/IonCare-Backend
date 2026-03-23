@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import sgMail from '@sendgrid/mail';
 import { env } from '../config/env';
 
+const EMAIL_PROVIDER_TIMEOUT_MS = 5000;
 const isSendGridConfigured = Boolean(env.SENDGRID_API_KEY && env.FROM_EMAIL);
 const isBrevoConfigured = Boolean(env.BREVO_API_KEY && (env.BREVO_FROM_EMAIL || env.FROM_EMAIL));
 const isSmtpConfigured = Boolean(env.SMTP_HOST && env.SMTP_PORT && env.SMTP_USER && env.SMTP_PASS && (env.BREVO_FROM_EMAIL || env.FROM_EMAIL));
@@ -16,6 +17,10 @@ const smtpTransporter = isSmtpConfigured
         host: env.SMTP_HOST,
         port: env.SMTP_PORT,
         secure: env.SMTP_PORT === 465,
+        connectionTimeout: EMAIL_PROVIDER_TIMEOUT_MS,
+        greetingTimeout: EMAIL_PROVIDER_TIMEOUT_MS,
+        socketTimeout: EMAIL_PROVIDER_TIMEOUT_MS,
+        dnsTimeout: EMAIL_PROVIDER_TIMEOUT_MS,
         auth: {
             user: env.SMTP_USER,
             pass: env.SMTP_PASS,
@@ -60,6 +65,9 @@ const postJson = (url: string, body: string, headers: Record<string, string>): P
             }
         );
 
+        request.setTimeout(EMAIL_PROVIDER_TIMEOUT_MS, () => {
+            request.destroy(new Error(`Brevo request timed out after ${EMAIL_PROVIDER_TIMEOUT_MS}ms`));
+        });
         request.on('error', reject);
         request.write(body);
         request.end();

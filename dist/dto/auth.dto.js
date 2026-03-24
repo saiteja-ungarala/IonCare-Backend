@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ResetPasswordSchema = exports.LoginOtpVerifySchema = exports.LoginOtpResendSchema = exports.LoginOtpStartSchema = exports.SignupResendOtpSchema = exports.SignupVerifyOtpSchema = exports.SignupInitiateSchema = exports.VerifyOtpSchema = exports.SendOtpSchema = exports.RefreshSchema = exports.ForgotPasswordSchema = exports.LoginSchema = exports.SignupSchema = void 0;
+exports.ResetPasswordSchema = exports.LoginOtpVerifySchema = exports.LoginOtpResendSchema = exports.LoginOtpStartSchema = exports.SignupResendOtpSchema = exports.SignupVerifyFirebaseSmsSchema = exports.SignupVerifyOtpSchema = exports.SignupInitiateSchema = exports.VerifyOtpSchema = exports.SendOtpSchema = exports.RefreshSchema = exports.ForgotPasswordSchema = exports.LoginSchema = exports.SignupSchema = void 0;
 const zod_1 = require("zod");
 const technician_domain_1 = require("../utils/technician-domain");
 // bcrypt silently truncates passwords longer than 72 bytes.
@@ -78,6 +78,12 @@ exports.SignupVerifyOtpSchema = zod_1.z.object({
         sessionToken: sessionTokenField,
         channel: zod_1.z.enum(['email', 'sms']),
         otp: otpField,
+    }),
+});
+exports.SignupVerifyFirebaseSmsSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        sessionToken: sessionTokenField,
+        firebaseIdToken: zod_1.z.string().min(1, 'Firebase ID token is required'),
     }),
 });
 exports.SignupResendOtpSchema = zod_1.z.object({

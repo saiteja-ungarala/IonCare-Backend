@@ -34,6 +34,7 @@ const otp_model_1 = require("../models/otp.model");
 const auth_otp_session_model_1 = require("../models/auth-otp-session.model");
 const sms_service_1 = require("./sms.service");
 const email_service_1 = require("./email.service");
+const firebase_admin_service_1 = require("./firebase-admin.service");
 const env_1 = require("../config/env");
 const technician_domain_1 = require("../utils/technician-domain");
 const OTP_EXPIRY_MS = 5 * 60 * 1000;
@@ -59,6 +60,13 @@ const maskPhone = (phone) => {
     if (phone.length < 4)
         return phone;
     return `${'*'.repeat(Math.max(0, phone.length - 4))}${phone.slice(-4)}`;
+};
+const normalizeFirebasePhone = (phone) => {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.startsWith('91') && digits.length === 12) {
+        return digits.slice(2);
+    }
+    return digits;
 };
 const assertIndianPhone = (phone) => {
     if (!/^[6-9]\d{9}$/.test(phone)) {
@@ -175,9 +183,47 @@ const verifySessionOtp = (session, channel, otp) => __awaiter(void 0, void 0, vo
     yield auth_otp_session_model_1.AuthOtpSessionModel.markChannelVerified(session.session_token, channel);
     return true;
 });
+const finalizeSignupIfReady = (updatedSession) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!updatedSession.email_verified) {
+        return {
+            completed: false,
+            session: buildOtpSessionPayload(updatedSession, 'signup', 'email', 'sms'),
+        };
+    }
+    if (!updatedSession.sms_verified) {
+        return {
+            completed: false,
+            session: buildOtpSessionPayload(updatedSession, 'signup', 'sms'),
+        };
+    }
+    let user = updatedSession.created_user_id
+        ? yield user_model_1.UserModel.findById(updatedSession.created_user_id)
+        : null;
+    if (!user) {
+        const existingEmailUser = yield user_model_1.UserModel.findByEmail(updatedSession.email);
+        if (existingEmailUser) {
+            throw createAppError('This email is already registered. Please log in.', 409, [{ field: 'email', message: 'This email is already registered.' }]);
+        }
+        const existingPhoneUser = yield user_model_1.UserModel.findByPhone(updatedSession.phone);
+        if (existingPhoneUser) {
+            throw createAppError('This phone number is already registered. Please log in.', 409, [{ field: 'phone', message: 'This phone number is already registered.' }]);
+        }
+        user = yield createUserAccount({
+            role: (0, technician_domain_1.normalizeRoleValue)(updatedSession.role),
+            full_name: updatedSession.full_name || '',
+            email: updatedSession.email,
+            phone: updatedSession.phone,
+            password_hash: updatedSession.password_hash || '',
+        });
+        yield auth_otp_session_model_1.AuthOtpSessionModel.setCreatedUser(updatedSession.session_token, user.id);
+    }
+    const tokens = yield exports.AuthService.generateTokens(user);
+    return Object.assign({ completed: true, user: exports.AuthService.sanitizeUser(user) }, tokens);
+});
 exports.AuthService = {
     signup(data) {
         return __awaiter(this, void 0, void 0, function* () {
+            const normalizedRole = (0, technician_domain_1.normalizeRoleValue)(data.role);
             const existingUser = yield user_model_1.UserModel.findByEmail(data.email);
             if (existingUser) {
                 throw createAppError('This email is already registered. Please log in.', 409, [{ field: 'email', message: 'This email is already registered.' }]);
@@ -189,7 +235,7 @@ exports.AuthService = {
                 }
             }
             const hashedPassword = yield bcrypt_1.default.hash(data.password_hash, 10);
-            const user = yield createUserAccount(Object.assign(Object.assign({}, data), { password_hash: hashedPassword }));
+            const user = yield createUserAccount(Object.assign(Object.assign({}, data), { role: normalizedRole, password_hash: hashedPassword }));
             const tokens = yield this.generateTokens(user);
             return Object.assign({ user: this.sanitizeUser(user) }, tokens);
         });
@@ -197,6 +243,7 @@ exports.AuthService = {
     initiateSignupVerification(data) {
         return __awaiter(this, void 0, void 0, function* () {
             assertIndianPhone(data.phone || '');
+            const normalizedRole = (0, technician_domain_1.normalizeRoleValue)(data.role);
             const existingUser = yield user_model_1.UserModel.findByEmail(data.email);
             if (existingUser) {
                 throw createAppError('This email is already registered. Please log in.', 409, [{ field: 'email', message: 'This email is already registered.' }]);
@@ -216,7 +263,7 @@ exports.AuthService = {
             yield auth_otp_session_model_1.AuthOtpSessionModel.create({
                 session_token: sessionToken,
                 purpose: 'signup',
-                role: data.role,
+                role: normalizedRole,
                 user_id: null,
                 created_user_id: null,
                 full_name: data.full_name,
@@ -241,7 +288,6 @@ exports.AuthService = {
             const activeSession = assertValidSession(session, 'signup');
             try {
                 yield sendOtpForSession(activeSession, 'email', 'email verification');
-                yield sendOtpForSession(activeSession, 'sms', 'mobile verification');
             }
             catch (error) {
                 yield auth_otp_session_model_1.AuthOtpSessionModel.deleteBySessionToken(sessionToken);
@@ -262,41 +308,25 @@ exports.AuthService = {
                 throw createAppError('Invalid OTP. Please try again.', 400, [{ field: 'otp', message: 'Invalid OTP. Please try again.' }]);
             }
             const updatedSession = assertValidSession(yield auth_otp_session_model_1.AuthOtpSessionModel.findBySessionToken(sessionToken), 'signup');
-            if (!updatedSession.email_verified) {
-                return {
-                    completed: false,
-                    session: buildOtpSessionPayload(updatedSession, 'signup', 'email', 'sms'),
-                };
+            return yield finalizeSignupIfReady(updatedSession);
+        });
+    },
+    verifySignupFirebaseSms(sessionToken, firebaseIdToken) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const session = assertValidSession(yield auth_otp_session_model_1.AuthOtpSessionModel.findBySessionToken(sessionToken), 'signup');
+            if (!session.email_verified) {
+                throw createAppError('Please verify your email OTP first.', 400, [{ field: 'channel', message: 'Please verify your email OTP first.' }]);
             }
-            if (!updatedSession.sms_verified) {
-                return {
-                    completed: false,
-                    session: buildOtpSessionPayload(updatedSession, 'signup', 'sms'),
-                };
+            const { phoneNumber } = yield firebase_admin_service_1.FirebaseAdminService.verifyPhoneIdToken(firebaseIdToken);
+            const normalizedFirebasePhone = normalizeFirebasePhone(phoneNumber);
+            if (normalizedFirebasePhone !== session.phone) {
+                throw createAppError('This SMS verification does not match the signup phone number.', 400, [{ field: 'firebaseIdToken', message: 'This SMS verification does not match the signup phone number.' }]);
             }
-            let user = updatedSession.created_user_id
-                ? yield user_model_1.UserModel.findById(updatedSession.created_user_id)
-                : null;
-            if (!user) {
-                const existingEmailUser = yield user_model_1.UserModel.findByEmail(updatedSession.email);
-                if (existingEmailUser) {
-                    throw createAppError('This email is already registered. Please log in.', 409, [{ field: 'email', message: 'This email is already registered.' }]);
-                }
-                const existingPhoneUser = yield user_model_1.UserModel.findByPhone(updatedSession.phone);
-                if (existingPhoneUser) {
-                    throw createAppError('This phone number is already registered. Please log in.', 409, [{ field: 'phone', message: 'This phone number is already registered.' }]);
-                }
-                user = yield createUserAccount({
-                    role: (0, technician_domain_1.normalizeRoleValue)(updatedSession.role),
-                    full_name: updatedSession.full_name || '',
-                    email: updatedSession.email,
-                    phone: updatedSession.phone,
-                    password_hash: updatedSession.password_hash || '',
-                });
-                yield auth_otp_session_model_1.AuthOtpSessionModel.setCreatedUser(updatedSession.session_token, user.id);
+            if (!session.sms_verified) {
+                yield auth_otp_session_model_1.AuthOtpSessionModel.markChannelVerified(session.session_token, 'sms');
             }
-            const tokens = yield this.generateTokens(user);
-            return Object.assign({ completed: true, user: this.sanitizeUser(user) }, tokens);
+            const updatedSession = assertValidSession(yield auth_otp_session_model_1.AuthOtpSessionModel.findBySessionToken(sessionToken), 'signup');
+            return yield finalizeSignupIfReady(updatedSession);
         });
     },
     resendSignupOtp(sessionToken, channel) {
@@ -304,6 +334,9 @@ exports.AuthService = {
             const session = assertValidSession(yield auth_otp_session_model_1.AuthOtpSessionModel.findBySessionToken(sessionToken), 'signup');
             if (channel === 'sms' && !session.email_verified) {
                 throw createAppError('Please verify your email OTP first.', 400, [{ field: 'channel', message: 'Please verify your email OTP first.' }]);
+            }
+            if (channel === 'sms') {
+                return buildOtpSessionPayload(session, 'signup', 'sms');
             }
             yield sendOtpForSession(session, channel, channel === 'email' ? 'email verification' : 'mobile verification');
             const updatedSession = assertValidSession(yield auth_otp_session_model_1.AuthOtpSessionModel.findBySessionToken(sessionToken), 'signup');

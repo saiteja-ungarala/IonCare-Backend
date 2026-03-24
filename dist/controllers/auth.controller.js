@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyLoginOtp = exports.verifyOtp = exports.resendLoginOtp = exports.startLoginOtp = exports.sendOtp = exports.resetPassword = exports.forgotPassword = exports.me = exports.logout = exports.refresh = exports.login = exports.resendSignupOtp = exports.verifySignupOtp = exports.initiateSignup = exports.signup = void 0;
+exports.verifyLoginOtp = exports.verifyOtp = exports.resendLoginOtp = exports.startLoginOtp = exports.sendOtp = exports.resetPassword = exports.forgotPassword = exports.me = exports.logout = exports.refresh = exports.login = exports.resendSignupOtp = exports.verifySignupFirebaseSms = exports.verifySignupOtp = exports.initiateSignup = exports.signup = void 0;
 const auth_service_1 = require("../services/auth.service");
 const user_model_1 = require("../models/user.model");
 const wallet_model_1 = require("../models/wallet.model");
@@ -46,6 +46,17 @@ const verifySignupOtp = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
     }
 });
 exports.verifySignupOtp = verifySignupOtp;
+const verifySignupFirebaseSms = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { sessionToken, firebaseIdToken } = req.body;
+        const result = yield auth_service_1.AuthService.verifySignupFirebaseSms(sessionToken, firebaseIdToken);
+        return (0, response_1.successResponse)(res, result, result.completed ? 'Signup completed' : 'SMS verified');
+    }
+    catch (error) {
+        next(error);
+    }
+});
+exports.verifySignupFirebaseSms = verifySignupFirebaseSms;
 const resendSignupOtp = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { sessionToken, channel } = req.body;

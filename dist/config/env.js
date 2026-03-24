@@ -69,5 +69,9 @@ exports.env = {
     SMTP_USER: getOptionalEnv('SMTP_USER'),
     SMTP_PASS: getOptionalEnv('SMTP_PASS') || getOptionalEnv('SMTP_PAS'),
     FROM_EMAIL: getOptionalEnv('FROM_EMAIL'),
+    FIREBASE_SERVICE_ACCOUNT_PATH: getOptionalEnv('FIREBASE_SERVICE_ACCOUNT_PATH'),
+    FIREBASE_PROJECT_ID: getOptionalEnv('FIREBASE_PROJECT_ID'),
+    FIREBASE_CLIENT_EMAIL: getOptionalEnv('FIREBASE_CLIENT_EMAIL'),
+    FIREBASE_PRIVATE_KEY: getOptionalEnv('FIREBASE_PRIVATE_KEY'),
     GOOGLE_MAPS_API_KEY: (_c = process.env.GOOGLE_MAPS_API_KEY) !== null && _c !== void 0 ? _c : '',
 };

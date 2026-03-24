@@ -42,6 +42,7 @@ const router = (0, express_1.Router)();
 router.post('/signup', (0, validate_middleware_1.validate)(auth_dto_1.SignupSchema), AuthController.signup);
 router.post('/signup/initiate', (0, validate_middleware_1.validate)(auth_dto_1.SignupInitiateSchema), AuthController.initiateSignup);
 router.post('/signup/verify-otp', (0, validate_middleware_1.validate)(auth_dto_1.SignupVerifyOtpSchema), AuthController.verifySignupOtp);
+router.post('/signup/verify-firebase-sms', (0, validate_middleware_1.validate)(auth_dto_1.SignupVerifyFirebaseSmsSchema), AuthController.verifySignupFirebaseSms);
 router.post('/signup/resend-otp', (0, validate_middleware_1.validate)(auth_dto_1.SignupResendOtpSchema), AuthController.resendSignupOtp);
 router.post('/login', (0, validate_middleware_1.validate)(auth_dto_1.LoginSchema), AuthController.login);
 router.post('/login/send-otp', (0, validate_middleware_1.validate)(auth_dto_1.LoginOtpStartSchema), AuthController.startLoginOtp);

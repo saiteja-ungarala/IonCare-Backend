@@ -267,7 +267,7 @@ const finalizeSignupIfReady = async (updatedSession: AuthOtpSession): Promise<an
         }
 
         user = await createUserAccount({
-            role: updatedSession.role as User['role'],
+            role: normalizeRoleValue(updatedSession.role) as User['role'],
             full_name: updatedSession.full_name || '',
             email: updatedSession.email,
             phone: updatedSession.phone,
@@ -287,6 +287,8 @@ const finalizeSignupIfReady = async (updatedSession: AuthOtpSession): Promise<an
 
 export const AuthService = {
     async signup(data: User): Promise<any> {
+        const normalizedRole = normalizeRoleValue(data.role) as User['role'];
+
         const existingUser = await UserModel.findByEmail(data.email);
         if (existingUser) {
             throw createAppError(
@@ -308,13 +310,15 @@ export const AuthService = {
         }
 
         const hashedPassword = await bcrypt.hash(data.password_hash, 10);
-        const user = await createUserAccount({ ...data, password_hash: hashedPassword });
+        const user = await createUserAccount({ ...data, role: normalizedRole, password_hash: hashedPassword });
         const tokens = await this.generateTokens(user);
         return { user: this.sanitizeUser(user), ...tokens };
     },
 
     async initiateSignupVerification(data: User): Promise<any> {
         assertIndianPhone(data.phone || '');
+
+        const normalizedRole = normalizeRoleValue(data.role) as User['role'];
 
         const existingUser = await UserModel.findByEmail(data.email);
         if (existingUser) {
@@ -347,7 +351,7 @@ export const AuthService = {
         await AuthOtpSessionModel.create({
             session_token: sessionToken,
             purpose: 'signup',
-            role: data.role,
+            role: normalizedRole,
             user_id: null,
             created_user_id: null,
             full_name: data.full_name,
@@ -429,43 +433,8 @@ export const AuthService = {
             );
         }
 
-<<<<<<< Updated upstream
         if (!session.sms_verified) {
             await AuthOtpSessionModel.markChannelVerified(session.session_token, 'sms');
-=======
-        let user = updatedSession.created_user_id
-            ? await UserModel.findById(updatedSession.created_user_id)
-            : null;
-
-        if (!user) {
-            const existingEmailUser = await UserModel.findByEmail(updatedSession.email);
-            if (existingEmailUser) {
-                throw createAppError(
-                    'This email is already registered. Please log in.',
-                    409,
-                    [{ field: 'email', message: 'This email is already registered.' }],
-                );
-            }
-
-            const existingPhoneUser = await UserModel.findByPhone(updatedSession.phone);
-            if (existingPhoneUser) {
-                throw createAppError(
-                    'This phone number is already registered. Please log in.',
-                    409,
-                    [{ field: 'phone', message: 'This phone number is already registered.' }],
-                );
-            }
-
-            user = await createUserAccount({
-                role: normalizeRoleValue(updatedSession.role) as User['role'],
-                full_name: updatedSession.full_name || '',
-                email: updatedSession.email,
-                phone: updatedSession.phone,
-                password_hash: updatedSession.password_hash || '',
-            });
-
-            await AuthOtpSessionModel.setCreatedUser(updatedSession.session_token, user.id!);
->>>>>>> Stashed changes
         }
 
         const updatedSession = assertValidSession(await AuthOtpSessionModel.findBySessionToken(sessionToken), 'signup');

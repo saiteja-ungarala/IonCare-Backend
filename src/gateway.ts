@@ -18,7 +18,51 @@ const ALLOWED = (process.env.ALLOWED_ORIGINS || '')
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-const isExpoDevOrigin = (origin: string): boolean => origin.startsWith('exp://');
+const parseOrigin = (origin: string): URL | null => {
+    try {
+        return new URL(origin);
+    } catch {
+        return null;
+    }
+};
+
+const isExpoDevOrigin = (origin: string): boolean => {
+    const normalized = origin.toLowerCase();
+    return normalized.startsWith('exp://')
+        || normalized.includes('.exp.direct')
+        || normalized.includes('.expo.dev');
+};
+
+const isLocalWebOrigin = (origin: string): boolean => {
+    const parsed = parseOrigin(origin);
+    if (!parsed) return false;
+
+    const hostname = parsed.hostname.toLowerCase();
+
+    return hostname === 'localhost'
+        || hostname === '127.0.0.1'
+        || hostname === '::1'
+        || /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)
+        || /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname)
+        || /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname);
+};
+
+const isRailwayOrigin = (origin: string): boolean => {
+    const parsed = parseOrigin(origin);
+    if (!parsed) return false;
+
+    const hostname = parsed.hostname.toLowerCase();
+    return hostname.endsWith('.railway.app') || hostname.endsWith('.up.railway.app');
+};
+
+const isAllowedOrigin = (origin?: string): boolean => {
+    if (!origin) return true;
+
+    return ALLOWED.includes(origin)
+        || isExpoDevOrigin(origin)
+        || isLocalWebOrigin(origin)
+        || isRailwayOrigin(origin);
+};
 
 const createRateLimitHandler = (message: string) => (_req: express.Request, res: express.Response) => {
     return errorResponse(res, message, 429);
@@ -72,10 +116,11 @@ app.use(
 app.use(
     cors({
         origin: (origin, cb) =>
-            !origin || ALLOWED.includes(origin) || isExpoDevOrigin(origin)
+            isAllowedOrigin(origin ?? undefined)
                 ? cb(null, true)
-                : cb(new Error('CORS')),
+                : cb(new Error(`CORS: ${origin || 'unknown-origin'}`)),
         credentials: true,
+        optionsSuccessStatus: 204,
     })
 );
 

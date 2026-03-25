@@ -29,7 +29,47 @@ const ALLOWED = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
-const isExpoDevOrigin = (origin) => origin.startsWith('exp://');
+const parseOrigin = (origin) => {
+    try {
+        return new URL(origin);
+    }
+    catch (_a) {
+        return null;
+    }
+};
+const isExpoDevOrigin = (origin) => {
+    const normalized = origin.toLowerCase();
+    return normalized.startsWith('exp://')
+        || normalized.includes('.exp.direct')
+        || normalized.includes('.expo.dev');
+};
+const isLocalWebOrigin = (origin) => {
+    const parsed = parseOrigin(origin);
+    if (!parsed)
+        return false;
+    const hostname = parsed.hostname.toLowerCase();
+    return hostname === 'localhost'
+        || hostname === '127.0.0.1'
+        || hostname === '::1'
+        || /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)
+        || /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname)
+        || /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname);
+};
+const isRailwayOrigin = (origin) => {
+    const parsed = parseOrigin(origin);
+    if (!parsed)
+        return false;
+    const hostname = parsed.hostname.toLowerCase();
+    return hostname.endsWith('.railway.app') || hostname.endsWith('.up.railway.app');
+};
+const isAllowedOrigin = (origin) => {
+    if (!origin)
+        return true;
+    return ALLOWED.includes(origin)
+        || isExpoDevOrigin(origin)
+        || isLocalWebOrigin(origin)
+        || isRailwayOrigin(origin);
+};
 const createRateLimitHandler = (message) => (_req, res) => {
     return (0, response_1.errorResponse)(res, message, 429);
 };
@@ -71,10 +111,11 @@ app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 app.use((0, cors_1.default)({
-    origin: (origin, cb) => !origin || ALLOWED.includes(origin) || isExpoDevOrigin(origin)
+    origin: (origin, cb) => isAllowedOrigin(origin !== null && origin !== void 0 ? origin : undefined)
         ? cb(null, true)
-        : cb(new Error('CORS')),
+        : cb(new Error(`CORS: ${origin || 'unknown-origin'}`)),
     credentials: true,
+    optionsSuccessStatus: 204,
 }));
 app.use(express_1.default.json({ limit: '50kb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '50kb' }));

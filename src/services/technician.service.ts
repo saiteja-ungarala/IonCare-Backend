@@ -1,5 +1,6 @@
 import pool from '../config/db';
-import { BOOKING_STATUS } from '../config/constants';
+import { ResultSetHeader } from 'mysql2';
+import { BOOKING_STATUS, SCHEDULE_EARLY_START_BUFFER_MINUTES } from '../config/constants';
 import { TechnicianModel } from '../models/technician.model';
 import { UserModel } from '../models/user.model';
 import { BookingUpdateModel } from '../models/booking-update.model';
@@ -140,6 +141,9 @@ export const TechnicianService = {
         if (!profile) {
             throw { type: 'AppError', message: 'Technician profile not found', statusCode: 404 };
         }
+        if (profile.verification_status !== 'approved') {
+            throw { type: 'AppError', message: 'Only approved technicians can view available jobs', statusCode: 403 };
+        }
 
         const myJobs = await TechnicianModel.getMyAssignedJobs(technicianId);
 
@@ -152,20 +156,11 @@ export const TechnicianService = {
         }
 
         if (profile.base_lat === null || profile.base_lng === null) {
-            console.warn(`[TechnicianService] Technician ${technicianId} has no base coordinates. Returning available jobs without distance filter.`);
-            const availableJobs = await TechnicianModel.getAvailableJobsWithoutDistance(technicianId);
-            const jobsMap = new Map<number, any>();
-            [...availableJobs, ...myJobs].forEach((job) => jobsMap.set(Number(job.id), job));
-            const jobs = Array.from(jobsMap.values()).sort((a, b) => {
-                const aDate = new Date(a.created_at || 0).getTime();
-                const bDate = new Date(b.created_at || 0).getTime();
-                return bDate - aDate;
-            });
             return {
-                jobs,
+                jobs: myJobs,
                 meta: {
                     distance_filter_applied: false,
-                    note: 'Technician base coordinates are missing; distance filter was skipped.',
+                    note: 'Location not set. Please update your location to see nearby jobs.',
                 },
             };
         }
@@ -201,7 +196,7 @@ export const TechnicianService = {
     },
 
     async acceptJob(technicianId: number, bookingId: number) {
-        // Pre-flight checks before acquiring the row lock
+        // Pre-flight checks (fail-fast before acquiring a transaction)
         await TechnicianModel.ensureProfile(technicianId);
         const techProfile = await TechnicianModel.getProfile(technicianId);
         if (!techProfile) {
@@ -217,6 +212,28 @@ export const TechnicianService = {
         const connection = await pool.getConnection();
         try {
             await connection.beginTransaction();
+
+            // Lock the technician profile row first to serialize concurrent acceptJob calls
+            // for the same technician (prevents two bookings being accepted simultaneously).
+            const [techLockRows] = await connection.query<any[]>(
+                `SELECT user_id FROM technician_profiles WHERE user_id = ? FOR UPDATE`,
+                [technicianId]
+            );
+            if (!techLockRows.length) {
+                throw { type: 'AppError', message: 'Technician profile not found', statusCode: 404 };
+            }
+
+            // Re-check active jobs inside the lock — the pre-flight check above is racy
+            // when two acceptJob calls arrive simultaneously for different bookings.
+            const [activeJobRows] = await connection.query<any[]>(
+                `SELECT id FROM bookings
+                 WHERE technician_id = ? AND status IN ('assigned', 'in_progress')
+                 FOR UPDATE`,
+                [technicianId]
+            );
+            if (activeJobRows.length > 0) {
+                throw { type: 'AppError', message: 'Complete your current active job before accepting a new one', statusCode: 409 };
+            }
 
             const [bookingRows] = await connection.query<any[]>(
                 `SELECT id, user_id, technician_id, status
@@ -234,7 +251,7 @@ export const TechnicianService = {
             if (booking.technician_id !== null) {
                 throw { type: 'AppError', message: 'Booking already assigned', statusCode: 409 };
             }
-            if (![BOOKING_STATUS.PENDING, BOOKING_STATUS.CONFIRMED].includes(booking.status)) {
+            if (booking.status !== BOOKING_STATUS.CONFIRMED) {
                 throw { type: 'AppError', message: 'Booking is not available for acceptance', statusCode: 400 };
             }
 
@@ -342,6 +359,15 @@ export const TechnicianService = {
             throw { type: 'AppError', message: 'You are not assigned to this booking', statusCode: 403 };
         }
 
+        // A 'completed' update must only be posted once the booking is in_progress
+        if (data.update_type === 'completed' && booking.status !== BOOKING_STATUS.IN_PROGRESS) {
+            throw {
+                type: 'AppError',
+                message: `Cannot post a 'completed' update on a booking in status '${booking.status}'. Advance to in_progress first.`,
+                statusCode: 400,
+            };
+        }
+
         const updateId = await BookingUpdateModel.create({
             booking_id: bookingId,
             technician_id: technicianId,
@@ -355,67 +381,122 @@ export const TechnicianService = {
         }
 
         if (data.update_type === 'completed') {
-            await pool.query(
-                'UPDATE bookings SET status = ?, completed_at = NOW() WHERE id = ?',
-                [BOOKING_STATUS.COMPLETED, bookingId]
+            // Guard against double-completion from concurrent calls: only the request that
+            // actually transitions the status sends the notification.
+            const [completeResult] = await pool.query<ResultSetHeader>(
+                'UPDATE bookings SET status = ?, completed_at = NOW() WHERE id = ? AND technician_id = ? AND status = ?',
+                [BOOKING_STATUS.COMPLETED, bookingId, technicianId, BOOKING_STATUS.IN_PROGRESS]
             );
 
-            UserModel.findById(Number(booking.user_id)).then((customer) => {
-                if (customer?.email) {
-                    EmailService.sendBookingCompleted(customer.email, {
-                        bookingId,
-                        amount: Number(booking.price ?? 0),
-                    });
-                }
-                NotificationService.sendToUser(Number(booking.user_id), 'Service Complete', 'Please rate your experience', { type: 'booking_completed', bookingId });
-            }).catch((err) => console.error('[TechnicianService] postJobUpdate notification error:', err));
+            if (completeResult.affectedRows > 0) {
+                UserModel.findById(Number(booking.user_id)).then((customer) => {
+                    if (customer?.email) {
+                        EmailService.sendBookingCompleted(customer.email, {
+                            bookingId,
+                            amount: Number(booking.price ?? 0),
+                        });
+                    }
+                    NotificationService.sendToUser(Number(booking.user_id), 'Service Complete', 'Please rate your experience', { type: 'booking_completed', bookingId });
+                }).catch((err) => console.error('[TechnicianService] postJobUpdate notification error:', err));
+            }
         }
 
         return { success: true, update_id: updateId };
     },
 
     async updateJobStatus(technicianId: number, bookingId: number, status: string) {
-        const [rows] = await pool.query<any[]>(
-            `SELECT id, user_id, technician_id, status, price
-             FROM bookings
-             WHERE id = ?`,
-            [bookingId]
-        );
+        const connection = await pool.getConnection();
+        let booking: any;
 
-        if (rows.length === 0) {
-            throw { type: 'AppError', message: 'Booking not found', statusCode: 404 };
+        try {
+            await connection.beginTransaction();
+
+            const [rows] = await connection.query<any[]>(
+                `SELECT id, user_id, technician_id, status, price, scheduled_date, scheduled_time
+                 FROM bookings
+                 WHERE id = ?
+                 FOR UPDATE`,
+                [bookingId]
+            );
+
+            if (rows.length === 0) {
+                throw { type: 'AppError', message: 'Booking not found', statusCode: 404 };
+            }
+
+            booking = rows[0];
+            if (Number(booking.technician_id) !== technicianId) {
+                throw { type: 'AppError', message: 'You are not assigned to this booking', statusCode: 403 };
+            }
+
+            const nextAllowedStatus = VALID_TECHNICIAN_TRANSITIONS[booking.status];
+            if (!nextAllowedStatus || nextAllowedStatus !== status) {
+                throw {
+                    type: 'AppError',
+                    message: `Invalid status transition from ${booking.status} to ${status}`,
+                    statusCode: 400,
+                };
+            }
+
+            // Early-start guard: technician cannot begin a job more than
+            // SCHEDULE_EARLY_START_BUFFER_MINUTES before the scheduled time.
+            if (status === BOOKING_STATUS.IN_PROGRESS && booking.scheduled_date && booking.scheduled_time) {
+                const scheduledAt = new Date(`${booking.scheduled_date}T${booking.scheduled_time}`);
+                if (!Number.isNaN(scheduledAt.getTime())) {
+                    const earliestStart = new Date(scheduledAt.getTime() - SCHEDULE_EARLY_START_BUFFER_MINUTES * 60_000);
+                    if (Date.now() < earliestStart.getTime()) {
+                        const minsLeft = Math.ceil((scheduledAt.getTime() - Date.now()) / 60_000);
+                        throw {
+                            type: 'AppError',
+                            message: `Job is scheduled for ${booking.scheduled_time}. You can start up to ${SCHEDULE_EARLY_START_BUFFER_MINUTES} min early — ${minsLeft} minute(s) remaining.`,
+                            statusCode: 400,
+                            code: 'TOO_EARLY_TO_START',
+                        };
+                    }
+                }
+            }
+
+            if (status === BOOKING_STATUS.COMPLETED) {
+                await connection.query(
+                    `UPDATE bookings
+                     SET status = ?, completed_at = NOW()
+                     WHERE id = ? AND technician_id = ?`,
+                    [status, bookingId, technicianId]
+                );
+            } else {
+                await connection.query(
+                    `UPDATE bookings
+                     SET status = ?
+                     WHERE id = ? AND technician_id = ?`,
+                    [status, bookingId, technicianId]
+                );
+            }
+
+            await connection.query(
+                `INSERT INTO booking_updates (booking_id, technician_id, update_type, note, media_url)
+                 VALUES (?, ?, ?, NULL, NULL)`,
+                [bookingId, technicianId, status]
+            );
+
+            await connection.commit();
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
         }
 
-        const booking = rows[0];
-        if (Number(booking.technician_id) !== technicianId) {
-            throw { type: 'AppError', message: 'You are not assigned to this booking', statusCode: 403 };
-        }
-
-        const nextAllowedStatus = VALID_TECHNICIAN_TRANSITIONS[booking.status];
-        if (!nextAllowedStatus || nextAllowedStatus !== status) {
-            throw {
-                type: 'AppError',
-                message: `Invalid status transition from ${booking.status} to ${status}`,
-                statusCode: 400,
-            };
-        }
-
-        await pool.query(
-            `UPDATE bookings
-             SET status = ?
-             WHERE id = ? AND technician_id = ?`,
-            [status, bookingId, technicianId]
-        );
+        const customerUserId = Number(booking.user_id);
 
         if (status === BOOKING_STATUS.COMPLETED) {
-            UserModel.findById(Number(booking.user_id)).then((customer) => {
+            UserModel.findById(customerUserId).then((customer) => {
                 if (customer?.email) {
                     EmailService.sendBookingCompleted(customer.email, {
                         bookingId,
                         amount: Number(booking.price ?? 0),
                     });
                 }
-            }).catch((err) => console.error('[TechnicianService] updateJobStatus email error:', err));
+                NotificationService.sendToUser(customerUserId, 'Service Complete', 'Please rate your experience', { type: 'booking_completed', bookingId });
+            }).catch((err) => console.error('[TechnicianService] updateJobStatus completion notification error:', err));
         }
 
         return {

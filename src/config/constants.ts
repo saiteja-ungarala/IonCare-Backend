@@ -14,6 +14,10 @@ export const BOOKING_STATUS = {
     CANCELLED: 'cancelled',
 } as const;
 
+// How many minutes before the scheduled start time a technician is allowed to
+// begin the job. Raise this value to give technicians more lead time.
+export const SCHEDULE_EARLY_START_BUFFER_MINUTES = 15;
+
 export const ORDER_STATUS = {
     PENDING: 'pending',
     PAID: 'paid',

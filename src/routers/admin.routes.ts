@@ -16,6 +16,9 @@ router.get('/dashboard', AdminController.getDashboard);
 // KYC Stats (before parameterised routes)
 router.get('/kyc/stats', AdminController.getKycStats);
 
+// Technician monitoring — full list with online/location/job counts
+router.get('/technicians', AdminController.adminListTechnicians);
+
 // Technician KYC
 router.get('/kyc/technicians',                              AdminController.listTechnicianKyc);
 router.get('/kyc/technicians/:technicianId',                AdminController.getTechnicianKycDetail);

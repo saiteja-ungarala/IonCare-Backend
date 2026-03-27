@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getBookingUpdates = exports.cancelBooking = exports.createBooking = exports.getBookings = void 0;
+exports.getBookingUpdates = exports.cancelBooking = exports.getBookingDetail = exports.createBooking = exports.getBookings = void 0;
 const bookings_service_1 = require("../services/bookings.service");
 const response_1 = require("../utils/response");
 const getBookings = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
@@ -27,13 +27,25 @@ const createBooking = (req, res, next) => __awaiter(void 0, void 0, void 0, func
     try {
         const userId = req.user.id;
         const result = yield bookings_service_1.BookingService.createBooking(userId, req.body);
-        return (0, response_1.successResponse)(res, result, 'Booking confirmed', 201);
+        return (0, response_1.successResponse)(res, result, 'Booking created', 201);
     }
     catch (error) {
         next(error);
     }
 });
 exports.createBooking = createBooking;
+const getBookingDetail = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const userId = req.user.id;
+        const bookingId = Number(req.params.id);
+        const result = yield bookings_service_1.BookingService.getBookingDetail(userId, bookingId);
+        return (0, response_1.successResponse)(res, result);
+    }
+    catch (error) {
+        next(error);
+    }
+});
+exports.getBookingDetail = getBookingDetail;
 const cancelBooking = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const userId = req.user.id;

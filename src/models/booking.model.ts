@@ -10,6 +10,7 @@ export interface Booking {
     address_id?: number;
     scheduled_date: string;
     scheduled_time: string;
+    time_slot_end?: string | null;
     status: string;
     price: number;
     notes?: string;
@@ -22,11 +23,11 @@ export interface Booking {
 export const BookingModel = {
     async create(data: Partial<Booking>): Promise<number> {
         const [result] = await pool.query<ResultSetHeader>(
-            `INSERT INTO bookings (user_id, service_id, address_id, scheduled_date, scheduled_time, status, price, notes) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO bookings (user_id, service_id, address_id, scheduled_date, scheduled_time, time_slot_end, status, price, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 data.user_id, data.service_id, data.address_id || null, data.scheduled_date, data.scheduled_time,
-                data.status || BOOKING_STATUS.PENDING, data.price, data.notes || null
+                data.time_slot_end || null, data.status || BOOKING_STATUS.PENDING, data.price, data.notes || null
             ]
         );
         return result.insertId;
@@ -49,7 +50,7 @@ export const BookingModel = {
         const query = `
       SELECT b.id, b.user_id, b.service_id,
              b.technician_id,
-             b.address_id, b.scheduled_date, b.scheduled_time,
+             b.address_id, b.scheduled_date, b.scheduled_time, b.time_slot_end,
              b.status, b.price, b.notes, b.assigned_at, b.completed_at, b.created_at, b.updated_at,
              s.name as service_name, s.image_url as service_image, s.category as service_category, s.duration_minutes,
              a.line1 as address_line1, a.city as address_city, a.state as address_state, a.postal_code as address_postal_code,
@@ -60,7 +61,7 @@ export const BookingModel = {
       LEFT JOIN addresses a ON b.address_id = a.id
       LEFT JOIN users t ON b.technician_id = t.id
       ${where}
-      ORDER BY b.created_at DESC 
+      ORDER BY b.created_at DESC
       LIMIT ? OFFSET ?
     `;
         const queryValues = [...values, limit, offset];
@@ -72,7 +73,7 @@ export const BookingModel = {
         const [rows] = await pool.query<RowDataPacket[]>(
             `SELECT b.id, b.user_id, b.service_id,
                     b.technician_id,
-                    b.address_id, b.scheduled_date, b.scheduled_time,
+                    b.address_id, b.scheduled_date, b.scheduled_time, b.time_slot_end,
                     b.status, b.price, b.notes, b.assigned_at, b.completed_at, b.created_at, b.updated_at,
                     s.name as service_name, s.duration_minutes, s.image_url as service_image, s.category as service_category,
                     a.line1 as address_line1, a.city as address_city, a.state as address_state, a.postal_code as address_postal_code,

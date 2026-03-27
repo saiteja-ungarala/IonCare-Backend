@@ -3,6 +3,8 @@ import pool from '../config/db';
 import { RowDataPacket, OkPacket } from 'mysql2';
 import { successResponse, errorResponse } from '../utils/response';
 import { buildRoleCondition, getCompatibleTechnicianId, normalizeRoleValue } from '../utils/technician-domain';
+import { WalletModel } from '../models/wallet.model';
+import { NotificationService } from '../services/notification.service';
 
 
 async function getKycListPaginated(
@@ -233,7 +235,8 @@ export const getTechnicianKycDetail = async (req: Request, res: Response, next: 
 
         const [userRows] = await pool.query<RowDataPacket[]>(
             `SELECT u.id, u.full_name, u.email, u.phone, u.role, u.is_active, u.created_at,
-                    tp.verification_status, tp.created_at AS profile_created_at
+                    tp.verification_status, tp.is_online, tp.base_lat, tp.base_lng,
+                    tp.service_radius_km, tp.last_online_at, tp.created_at AS profile_created_at
              FROM users u
              JOIN technician_profiles tp ON tp.user_id = u.id
              WHERE u.id = ?`,
@@ -341,6 +344,53 @@ export const getKycStats = async (req: Request, res: Response, next: NextFunctio
         return successResponse(res, {
             technicians: toCounts(technicianRows),
             dealers: toCounts(dealerRows),
+        });
+    } catch (error) { next(error); }
+};
+
+// ─── Technician Monitoring List ──────────────────────────────────────────────
+
+export const adminListTechnicians = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const page = Math.max(1, parseInt(req.query.page as string) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
+        const offset = (page - 1) * limit;
+        const { status, search } = req.query;
+
+        const conditions: string[] = [];
+        const params: any[] = [];
+
+        if (status) { conditions.push('tp.verification_status = ?'); params.push(status); }
+        if (search) {
+            conditions.push('(u.full_name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)');
+            params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+        }
+
+        const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+        const [countRows] = await pool.query<RowDataPacket[]>(
+            `SELECT COUNT(*) AS total FROM users u JOIN technician_profiles tp ON tp.user_id = u.id ${where}`,
+            params
+        );
+        const total = Number(countRows[0].total);
+
+        const [rows] = await pool.query<RowDataPacket[]>(
+            `SELECT u.id, u.full_name, u.email, u.phone, u.created_at,
+                    tp.verification_status, tp.is_online, tp.base_lat, tp.base_lng,
+                    tp.service_radius_km, tp.last_online_at,
+                    (SELECT COUNT(*) FROM bookings b WHERE b.technician_id = u.id AND b.status IN ('assigned', 'in_progress')) AS active_jobs,
+                    (SELECT COUNT(*) FROM bookings b WHERE b.technician_id = u.id AND b.status = 'completed') AS completed_jobs
+             FROM users u
+             JOIN technician_profiles tp ON tp.user_id = u.id
+             ${where}
+             ORDER BY tp.is_online DESC, u.id DESC
+             LIMIT ? OFFSET ?`,
+            [...params, limit, offset]
+        );
+
+        return successResponse(res, {
+            items: rows,
+            pagination: { page, limit, totalItems: total, totalPages: Math.ceil(total / limit) },
         });
     } catch (error) { next(error); }
 };
@@ -1024,6 +1074,9 @@ export const adminGetBookingDetail = async (req: Request, res: Response, next: N
     } catch (error) { next(error); }
 };
 
+// Dispatchable states — 'assigned' is included so admin can re-dispatch a stalled/ghosted job
+const DISPATCHABLE_STATUSES = ['confirmed', 'assigned'] as const;
+
 export const adminAssignBooking = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const adminId = (req.user as any).id;
@@ -1032,20 +1085,55 @@ export const adminAssignBooking = async (req: Request, res: Response, next: Next
 
         if (!technicianId) return errorResponse(res, 'Technician ID is required', 400);
 
-        const [technicianRows] = await pool.query<RowDataPacket[]>(
-            `SELECT id FROM users WHERE id = ? AND role = 'technician'`, [technicianId]
+        // Booking must exist and be in a dispatchable state
+        const [bookingRows] = await pool.query<RowDataPacket[]>(
+            `SELECT id, user_id, status, technician_id FROM bookings WHERE id = ?`,
+            [id]
         );
-        if (technicianRows.length === 0) return errorResponse(res, 'Technician not found', 404);
+        if (bookingRows.length === 0) return errorResponse(res, 'Booking not found', 404);
+        const booking = bookingRows[0];
+        if (!(DISPATCHABLE_STATUSES as readonly string[]).includes(booking.status)) {
+            return errorResponse(res, `Booking cannot be assigned in status '${booking.status}'`, 400);
+        }
 
-        await pool.query(
-            `UPDATE bookings SET technician_id = ?, status = 'assigned', assigned_at = NOW() WHERE id = ?`,
+        // Technician must exist and have an approved KYC profile
+        const [techRows] = await pool.query<RowDataPacket[]>(
+            `SELECT u.id FROM users u
+             JOIN technician_profiles tp ON tp.user_id = u.id
+             WHERE u.id = ? AND u.role = 'technician' AND tp.verification_status = 'approved'`,
+            [technicianId]
+        );
+        if (techRows.length === 0) {
+            return errorResponse(res, 'Technician not found or not approved', 404);
+        }
+
+        // Race-safe: re-check state inside the WHERE clause
+        const [result] = await pool.query<OkPacket>(
+            `UPDATE bookings
+             SET technician_id = ?, status = 'assigned', assigned_at = NOW()
+             WHERE id = ? AND status IN ('confirmed', 'assigned')`,
             [technicianId, id]
         );
+        if (result.affectedRows === 0) {
+            return errorResponse(res, 'Booking was updated by another request; please refresh', 409);
+        }
 
-        await logAdminAction(adminId, 'assigned_booking', 'booking', id, {
-            technician_id: technicianId,
-        });
-        return successResponse(res, null, 'Booking assigned');
+        await logAdminAction(adminId, 'assigned_booking', 'booking', id, { technician_id: technicianId });
+
+        // Notify all parties fire-and-forget
+        const notifications: Promise<void>[] = [
+            NotificationService.sendToUser(technicianId, 'New Job Assigned', `You have been assigned booking #${id}`, { type: 'booking_assigned', bookingId: id }),
+            NotificationService.sendToUser(Number(booking.user_id), 'Technician Assigned', 'A technician has been assigned to your booking', { type: 'technician_assigned', bookingId: id }),
+        ];
+        // If re-dispatching a previously assigned booking, notify the displaced technician
+        if (booking.technician_id && Number(booking.technician_id) !== technicianId) {
+            notifications.push(
+                NotificationService.sendToUser(Number(booking.technician_id), 'Job Reassigned', `Booking #${id} has been reassigned by admin`, { type: 'job_reassigned', bookingId: id })
+            );
+        }
+        Promise.all(notifications).catch((err) => console.error('[adminAssignBooking] notification error:', err));
+
+        return successResponse(res, { booking_id: id, technician_id: technicianId }, 'Booking assigned');
     } catch (error) { next(error); }
 };
 
@@ -1059,12 +1147,69 @@ export const adminCancelBooking = async (req: Request, res: Response, next: Next
             return errorResponse(res, 'reason is required', 400);
         }
 
-        const [rows] = await pool.query<RowDataPacket[]>(`SELECT id FROM bookings WHERE id = ?`, [id]);
+        const [rows] = await pool.query<RowDataPacket[]>(
+            `SELECT id, user_id, status, technician_id FROM bookings WHERE id = ?`,
+            [id]
+        );
         if (rows.length === 0) return errorResponse(res, 'Booking not found', 404);
+        const booking = rows[0];
 
-        await pool.query(`UPDATE bookings SET status = 'cancelled' WHERE id = ?`, [id]);
-        await logAdminAction(adminId, 'cancelled_booking', 'booking', id, { reason });
-        return successResponse(res, null, 'Booking cancelled');
+        // Atomic status-guarded cancel — prevents race with a concurrent status transition
+        const [cancelResult] = await pool.query<OkPacket>(
+            `UPDATE bookings
+             SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, cancelled_at = NOW()
+             WHERE id = ? AND status NOT IN ('cancelled', 'completed')`,
+            [String(reason).trim(), adminId, id]
+        );
+        if (cancelResult.affectedRows === 0) {
+            return errorResponse(res, `Booking cannot be cancelled in status '${booking.status}'`, 400);
+        }
+
+        // Refund wallet credit if a paid Razorpay payment exists for this booking
+        let refunded = false;
+        let refundAmount = 0;
+        const [payRows] = await pool.query<RowDataPacket[]>(
+            `SELECT id, amount FROM payments
+             WHERE entity_type = 'booking' AND entity_id = ? AND status = 'paid'
+             LIMIT 1`,
+            [id]
+        );
+        if (payRows.length > 0) {
+            refundAmount = Number(payRows[0].amount);
+            await pool.query(`UPDATE payments SET status = 'refunded' WHERE id = ?`, [payRows[0].id]);
+            await WalletModel.creditWithIdempotency(Number(booking.user_id), {
+                amount: refundAmount,
+                txn_type: 'credit',
+                source: 'refund',
+                idempotency_key: `admin_booking_cancel:${id}`,
+            });
+            refunded = true;
+        }
+
+        await logAdminAction(adminId, 'cancelled_booking', 'booking', id, {
+            reason,
+            refunded,
+            refund_amount: refundAmount,
+        });
+
+        NotificationService.sendToUser(
+            Number(booking.user_id),
+            'Booking Cancelled',
+            'Your booking has been cancelled. Any payment will be refunded to your wallet.',
+            { type: 'booking_cancelled', bookingId: id }
+        ).catch((err) => console.error('[adminCancelBooking] notification error:', err));
+
+        // Notify the assigned technician so they don't keep seeing a ghost job
+        if (booking.technician_id) {
+            NotificationService.sendToUser(
+                Number(booking.technician_id),
+                'Job Cancelled',
+                `Booking #${id} has been cancelled by admin`,
+                { type: 'job_cancelled', bookingId: id }
+            ).catch(() => {});
+        }
+
+        return successResponse(res, { refunded, refund_amount: refundAmount }, 'Booking cancelled');
     } catch (error) { next(error); }
 };
 

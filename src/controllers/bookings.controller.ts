@@ -16,7 +16,18 @@ export const createBooking = async (req: Request, res: Response, next: NextFunct
     try {
         const userId = (req.user as any).id;
         const result = await BookingService.createBooking(userId, req.body);
-        return successResponse(res, result, 'Booking confirmed', 201);
+        return successResponse(res, result, 'Booking created', 201);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getBookingDetail = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = (req.user as any).id;
+        const bookingId = Number(req.params.id);
+        const result = await BookingService.getBookingDetail(userId, bookingId);
+        return successResponse(res, result);
     } catch (error) {
         next(error);
     }

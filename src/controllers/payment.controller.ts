@@ -1,9 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import pool from '../config/db';
-import { RowDataPacket } from 'mysql2';
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { env } from '../config/env';
 import { PaymentService } from '../services/payment.service';
 import { PaymentModel } from '../models/payment.model';
+import { BookingService } from '../services/bookings.service';
 import { successResponse, errorResponse } from '../utils/response';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -119,7 +120,15 @@ export const verifyPayment = async (req: Request, res: Response, next: NextFunct
         await PaymentModel.markPaid(razorpay_order_id, razorpay_payment_id, razorpay_signature);
 
         if (payment.entity_type === 'booking') {
-            await pool.query('UPDATE bookings SET status = ? WHERE id = ?', ['confirmed', payment.entity_id]);
+            const [result] = await pool.query<ResultSetHeader>(
+                'UPDATE bookings SET status = ? WHERE id = ? AND status = ?',
+                ['confirmed', payment.entity_id, 'pending']
+            );
+            if (result.affectedRows > 0) {
+                BookingService.fanOutToNearbyTechnicians(payment.entity_id).catch((err) =>
+                    console.error('[verifyPayment] fanOut error:', err)
+                );
+            }
         } else if (payment.entity_type === 'order') {
             await pool.query('UPDATE orders SET status = ? WHERE id = ?', ['paid', payment.entity_id]);
         }
@@ -155,7 +164,15 @@ export const webhook = async (req: Request, res: Response) => {
                 if (payment && payment.status !== 'paid') {
                     await PaymentModel.markPaid(paymentEntity.order_id, paymentEntity.id, '');
                     if (payment.entity_type === 'booking') {
-                        await pool.query('UPDATE bookings SET status = ? WHERE id = ?', ['confirmed', payment.entity_id]);
+                        const [result] = await pool.query<ResultSetHeader>(
+                            'UPDATE bookings SET status = ? WHERE id = ? AND status = ?',
+                            ['confirmed', payment.entity_id, 'pending']
+                        );
+                        if (result.affectedRows > 0) {
+                            BookingService.fanOutToNearbyTechnicians(payment.entity_id).catch((err) =>
+                                console.error('[webhook] fanOut error:', err)
+                            );
+                        }
                     } else if (payment.entity_type === 'order') {
                         await pool.query('UPDATE orders SET status = ? WHERE id = ?', ['paid', payment.entity_id]);
                     }

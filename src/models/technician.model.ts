@@ -195,6 +195,7 @@ export const TechnicianModel = {
                 b.address_id,
                 b.scheduled_date,
                 b.scheduled_time,
+                b.time_slot_end,
                 b.status,
                 b.price,
                 b.notes,
@@ -222,7 +223,7 @@ export const TechnicianModel = {
                AND bo_rejected.technician_id = ?
                AND bo_rejected.status = 'rejected'
              WHERE b.technician_id IS NULL
-               AND b.status IN (?, ?)
+               AND b.status = ?
                AND bo_rejected.id IS NULL
                AND a.latitude IS NOT NULL
                AND a.longitude IS NOT NULL
@@ -233,7 +234,6 @@ export const TechnicianModel = {
                 baseLng,
                 baseLat,
                 technicianId,
-                BOOKING_STATUS.PENDING,
                 BOOKING_STATUS.CONFIRMED,
                 radiusKm,
             ]
@@ -251,6 +251,7 @@ export const TechnicianModel = {
                 b.address_id,
                 b.scheduled_date,
                 b.scheduled_time,
+                b.time_slot_end,
                 b.status,
                 b.price,
                 b.notes,
@@ -278,12 +279,11 @@ export const TechnicianModel = {
                AND bo_rejected.technician_id = ?
                AND bo_rejected.status = 'rejected'
              WHERE b.technician_id IS NULL
-               AND b.status IN (?, ?)
+               AND b.status = ?
                AND bo_rejected.id IS NULL
              ORDER BY b.created_at ASC`,
             [
                 technicianId,
-                BOOKING_STATUS.PENDING,
                 BOOKING_STATUS.CONFIRMED,
             ]
         );
@@ -300,6 +300,7 @@ export const TechnicianModel = {
                 b.address_id,
                 b.scheduled_date,
                 b.scheduled_time,
+                b.time_slot_end,
                 b.status,
                 b.price,
                 b.notes,

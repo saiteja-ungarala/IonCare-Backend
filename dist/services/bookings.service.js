@@ -55,10 +55,19 @@ exports.BookingService = {
             const service = yield service_model_1.ServiceModel.findById(data.service_id);
             if (!service)
                 throw { type: 'AppError', message: 'Service not found', statusCode: 404 };
-            if (data.address_id) {
-                const address = yield address_model_1.AddressModel.findById(data.address_id);
-                if (!address || address.user_id !== userId)
-                    throw { type: 'AppError', message: 'Invalid address', statusCode: 400 };
+            if (!data.address_id) {
+                throw { type: 'AppError', message: 'A service address is required', statusCode: 400 };
+            }
+            const address = yield address_model_1.AddressModel.findById(data.address_id);
+            if (!address || address.user_id !== userId) {
+                throw { type: 'AppError', message: 'Invalid address', statusCode: 400 };
+            }
+            if (address.latitude === undefined || address.latitude === null || address.longitude === undefined || address.longitude === null) {
+                throw {
+                    type: 'AppError',
+                    message: 'Selected address is missing location coordinates. Update the address using current location before booking.',
+                    statusCode: 400,
+                };
             }
             // Transactional booking create — checks First Service Free benefit
             const conn = yield db_1.default.getConnection();
@@ -70,11 +79,12 @@ exports.BookingService = {
                  FOR UPDATE`, [userId]);
                 const hasFree = benefits.length > 0;
                 const finalPrice = hasFree ? 0 : service.base_price;
+                const initialStatus = finalPrice === 0 ? constants_1.BOOKING_STATUS.CONFIRMED : constants_1.BOOKING_STATUS.PENDING;
                 const [result] = yield conn.execute(`INSERT INTO bookings (user_id, service_id, address_id, scheduled_date, scheduled_time, status, price, notes)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [
                     userId, data.service_id, data.address_id || null,
                     data.scheduled_date, data.scheduled_time,
-                    constants_1.BOOKING_STATUS.PENDING, finalPrice, data.notes || null,
+                    initialStatus, finalPrice, data.notes || null,
                 ]);
                 bookingId = result.insertId;
                 if (hasFree) {
@@ -91,6 +101,11 @@ exports.BookingService = {
                 conn.release();
             }
             const booking = yield booking_model_1.BookingModel.findById(bookingId);
+            const shouldDispatchImmediately = (booking === null || booking === void 0 ? void 0 : booking.status) === constants_1.BOOKING_STATUS.CONFIRMED;
+            if (shouldDispatchImmediately) {
+                // Fire-and-forget: fan-out new job notification to nearby approved technicians
+                exports.BookingService.fanOutToNearbyTechnicians(bookingId).catch((err) => console.error('[BookingService] fanOut error:', err));
+            }
             // Fire-and-forget: send booking confirmation email + push
             user_model_1.UserModel.findById(userId).then((user) => {
                 if ((user === null || user === void 0 ? void 0 : user.email) && booking) {
@@ -105,7 +120,9 @@ exports.BookingService = {
                         address,
                     });
                 }
-                notification_service_1.NotificationService.sendToUser(userId, 'Booking Confirmed', 'Finding your technician...', { type: 'booking_created', bookingId });
+                notification_service_1.NotificationService.sendToUser(userId, shouldDispatchImmediately ? 'Booking Confirmed' : 'Booking Created', shouldDispatchImmediately
+                    ? 'Finding your technician...'
+                    : 'Complete payment to confirm and dispatch your technician.', { type: 'booking_created', bookingId });
             }).catch((err) => console.error('[BookingService] notification error:', err));
             return booking;
         });
@@ -121,6 +138,31 @@ exports.BookingService = {
                 throw { type: 'AppError', message: 'Forbidden', statusCode: 403 };
             }
             return booking_update_model_1.BookingUpdateModel.findByBookingId(bookingId);
+        });
+    },
+    getBookingDetail(userId, bookingId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a;
+            const booking = yield booking_model_1.BookingModel.findById(bookingId);
+            if (!booking) {
+                throw { type: 'AppError', message: 'Booking not found', statusCode: 404 };
+            }
+            if (Number(booking.user_id) !== userId) {
+                throw { type: 'AppError', message: 'Forbidden', statusCode: 403 };
+            }
+            const [[paymentRows], [updateRows]] = yield Promise.all([
+                db_1.default.query(`SELECT razorpay_order_id, razorpay_payment_id, status, amount, created_at
+                 FROM payments
+                 WHERE entity_type = 'booking' AND entity_id = ?
+                 ORDER BY created_at DESC LIMIT 1`, [bookingId]),
+                db_1.default.query(`SELECT bu.id, bu.update_type, bu.note, bu.media_url, bu.created_at,
+                        u.full_name AS technician_name
+                 FROM booking_updates bu
+                 LEFT JOIN users u ON u.id = bu.technician_id
+                 WHERE bu.booking_id = ?
+                 ORDER BY bu.created_at ASC, bu.id ASC`, [bookingId]),
+            ]);
+            return Object.assign(Object.assign({}, booking), { payment: (_a = paymentRows[0]) !== null && _a !== void 0 ? _a : null, updates: updateRows });
         });
     },
     cancelBooking(userId, bookingId, reason) {
@@ -159,5 +201,35 @@ exports.BookingService = {
             }
             return { success: true, refunded, refund_amount: refundAmount };
         });
-    }
+    },
+    fanOutToNearbyTechnicians(bookingId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const [bookingRows] = yield db_1.default.query(`SELECT b.status, b.technician_id, a.latitude, a.longitude
+             FROM bookings b
+             LEFT JOIN addresses a ON a.id = b.address_id
+             WHERE b.id = ?`, [bookingId]);
+            if (!bookingRows.length)
+                return;
+            const booking = bookingRows[0];
+            if (booking.status !== constants_1.BOOKING_STATUS.CONFIRMED || booking.technician_id !== null)
+                return;
+            const { latitude: bookingLat, longitude: bookingLng } = booking;
+            if (bookingLat === null || bookingLng === null)
+                return;
+            const [techRows] = yield db_1.default.query(`SELECT tp.user_id
+             FROM technician_profiles tp
+             WHERE tp.verification_status = 'approved'
+               AND tp.is_online = 1
+               AND tp.base_lat IS NOT NULL
+               AND tp.base_lng IS NOT NULL
+               AND (6371 * ACOS(
+                   COS(RADIANS(tp.base_lat)) * COS(RADIANS(?)) *
+                   COS(RADIANS(?) - RADIANS(tp.base_lng)) +
+                   SIN(RADIANS(tp.base_lat)) * SIN(RADIANS(?))
+               )) <= tp.service_radius_km`, [bookingLat, bookingLng, bookingLat]);
+            for (const tech of techRows) {
+                notification_service_1.NotificationService.sendToUser(Number(tech.user_id), 'New Job Available', 'A service request is available in your area', { type: 'new_job_available', bookingId });
+            }
+        });
+    },
 };

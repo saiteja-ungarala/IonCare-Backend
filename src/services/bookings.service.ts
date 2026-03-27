@@ -10,6 +10,18 @@ import { EmailService } from './email.service';
 import { NotificationService } from './notification.service';
 import { BOOKING_STATUS } from '../config/constants';
 
+// Compute the end of a time slot given a HH:MM or HH:MM:SS start and a duration in minutes.
+// Used when the caller does not supply an explicit time_slot_end.
+function computeTimeSlotEnd(startTime: string, durationMinutes: number): string {
+    const parts = startTime.split(':').map(Number);
+    const h = parts[0] ?? 0;
+    const m = parts[1] ?? 0;
+    const totalMins = h * 60 + m + (durationMinutes > 0 ? durationMinutes : 60);
+    const endH = Math.floor(totalMins / 60) % 24;
+    const endM = totalMins % 60;
+    return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}:00`;
+}
+
 // Map status query param to actual DB status values
 const STATUS_MAP: Record<string, string[]> = {
     active: [BOOKING_STATUS.PENDING, BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.ASSIGNED, BOOKING_STATUS.IN_PROGRESS],
@@ -44,12 +56,27 @@ export const BookingService = {
         const service = await ServiceModel.findById(data.service_id);
         if (!service) throw { type: 'AppError', message: 'Service not found', statusCode: 404 };
 
-        if (data.address_id) {
-            const address = await AddressModel.findById(data.address_id);
-            if (!address || address.user_id !== userId) throw { type: 'AppError', message: 'Invalid address', statusCode: 400 };
+        if (!data.address_id) {
+            throw { type: 'AppError', message: 'A service address is required', statusCode: 400 };
+        }
+
+        const address = await AddressModel.findById(data.address_id);
+        if (!address || address.user_id !== userId) {
+            throw { type: 'AppError', message: 'Invalid address', statusCode: 400 };
+        }
+        if (address.latitude === undefined || address.latitude === null || address.longitude === undefined || address.longitude === null) {
+            throw {
+                type: 'AppError',
+                message: 'Selected address is missing location coordinates. Update the address using current location before booking.',
+                statusCode: 400,
+            };
         }
 
         // Transactional booking create — checks First Service Free benefit
+        // Resolve the slot end: use the caller's value or compute from service duration
+        const timeSlotEnd: string = data.time_slot_end
+            ?? computeTimeSlotEnd(data.scheduled_time, service.duration_minutes ?? 0);
+
         const conn = await pool.getConnection();
         await conn.beginTransaction();
         let bookingId = 0;
@@ -62,14 +89,15 @@ export const BookingService = {
             );
             const hasFree = benefits.length > 0;
             const finalPrice = hasFree ? 0 : service.base_price;
+            const initialStatus = finalPrice === 0 ? BOOKING_STATUS.CONFIRMED : BOOKING_STATUS.PENDING;
 
             const [result] = await conn.execute<ResultSetHeader>(
-                `INSERT INTO bookings (user_id, service_id, address_id, scheduled_date, scheduled_time, status, price, notes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                `INSERT INTO bookings (user_id, service_id, address_id, scheduled_date, scheduled_time, time_slot_end, status, price, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     userId, data.service_id, data.address_id || null,
-                    data.scheduled_date, data.scheduled_time,
-                    BOOKING_STATUS.PENDING, finalPrice, data.notes || null,
+                    data.scheduled_date, data.scheduled_time, timeSlotEnd,
+                    initialStatus, finalPrice, data.notes || null,
                 ]
             );
             bookingId = result.insertId;
@@ -91,6 +119,14 @@ export const BookingService = {
         }
 
         const booking = await BookingModel.findById(bookingId);
+        const shouldDispatchImmediately = booking?.status === BOOKING_STATUS.CONFIRMED;
+
+        if (shouldDispatchImmediately) {
+            // Fire-and-forget: fan-out new job notification to nearby approved technicians
+            BookingService.fanOutToNearbyTechnicians(bookingId).catch((err) =>
+                console.error('[BookingService] fanOut error:', err)
+            );
+        }
 
         // Fire-and-forget: send booking confirmation email + push
         UserModel.findById(userId).then((user) => {
@@ -106,7 +142,14 @@ export const BookingService = {
                     address,
                 });
             }
-            NotificationService.sendToUser(userId, 'Booking Confirmed', 'Finding your technician...', { type: 'booking_created', bookingId });
+            NotificationService.sendToUser(
+                userId,
+                shouldDispatchImmediately ? 'Booking Confirmed' : 'Booking Created',
+                shouldDispatchImmediately
+                    ? 'Finding your technician...'
+                    : 'Complete payment to confirm and dispatch your technician.',
+                { type: 'booking_created', bookingId }
+            );
         }).catch((err) => console.error('[BookingService] notification error:', err));
 
         return booking;
@@ -126,6 +169,41 @@ export const BookingService = {
         return BookingUpdateModel.findByBookingId(bookingId);
     },
 
+    async getBookingDetail(userId: number, bookingId: number) {
+        const booking = await BookingModel.findById(bookingId);
+        if (!booking) {
+            throw { type: 'AppError', message: 'Booking not found', statusCode: 404 };
+        }
+        if (Number(booking.user_id) !== userId) {
+            throw { type: 'AppError', message: 'Forbidden', statusCode: 403 };
+        }
+
+        const [[paymentRows], [updateRows]] = await Promise.all([
+            pool.query<RowDataPacket[]>(
+                `SELECT razorpay_order_id, razorpay_payment_id, status, amount, created_at
+                 FROM payments
+                 WHERE entity_type = 'booking' AND entity_id = ?
+                 ORDER BY created_at DESC LIMIT 1`,
+                [bookingId]
+            ),
+            pool.query<RowDataPacket[]>(
+                `SELECT bu.id, bu.update_type, bu.note, bu.media_url, bu.created_at,
+                        u.full_name AS technician_name
+                 FROM booking_updates bu
+                 LEFT JOIN users u ON u.id = bu.technician_id
+                 WHERE bu.booking_id = ?
+                 ORDER BY bu.created_at ASC, bu.id ASC`,
+                [bookingId]
+            ),
+        ]);
+
+        return {
+            ...booking,
+            payment: paymentRows[0] ?? null,
+            updates: updateRows,
+        };
+    },
+
     async cancelBooking(userId: number, bookingId: number, reason: string) {
         if (!reason?.trim()) {
             throw { type: 'AppError', message: 'Cancellation reason is required', statusCode: 400 };
@@ -134,17 +212,18 @@ export const BookingService = {
         const booking = await BookingModel.findById(bookingId);
         if (!booking) throw { type: 'AppError', message: 'Booking not found', statusCode: 404 };
         if (Number(booking.user_id) !== userId) throw { type: 'AppError', message: 'Forbidden', statusCode: 403 };
-        if (booking.status !== 'pending' && booking.status !== 'confirmed') {
-            throw { type: 'AppError', message: 'Cannot cancel a booking that is already assigned/in_progress/completed/cancelled', statusCode: 400 };
-        }
 
-        // Cancel the booking and record the reason
-        await pool.query(
+        // Atomic status-guarded cancel — prevents race where a technician accepts the job
+        // between the status read above and the update below.
+        const [cancelResult] = await pool.query<ResultSetHeader>(
             `UPDATE bookings
              SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, cancelled_at = NOW()
-             WHERE id = ?`,
+             WHERE id = ? AND status IN ('pending', 'confirmed')`,
             [reason.trim(), userId, bookingId]
         );
+        if (cancelResult.affectedRows === 0) {
+            throw { type: 'AppError', message: 'Cannot cancel a booking that is already assigned/in_progress/completed/cancelled', statusCode: 400 };
+        }
 
         // Refund if a paid Razorpay payment exists for this booking
         let refunded = false;
@@ -171,5 +250,46 @@ export const BookingService = {
         }
 
         return { success: true, refunded, refund_amount: refundAmount };
-    }
+    },
+
+    async fanOutToNearbyTechnicians(bookingId: number): Promise<void> {
+        const [bookingRows] = await pool.query<RowDataPacket[]>(
+            `SELECT b.status, b.technician_id, a.latitude, a.longitude
+             FROM bookings b
+             LEFT JOIN addresses a ON a.id = b.address_id
+             WHERE b.id = ?`,
+            [bookingId]
+        );
+        if (!bookingRows.length) return;
+
+        const booking = bookingRows[0];
+        if (booking.status !== BOOKING_STATUS.CONFIRMED || booking.technician_id !== null) return;
+
+        const { latitude: bookingLat, longitude: bookingLng } = booking;
+        if (bookingLat === null || bookingLng === null) return;
+
+        const [techRows] = await pool.query<RowDataPacket[]>(
+            `SELECT tp.user_id
+             FROM technician_profiles tp
+             WHERE tp.verification_status = 'approved'
+               AND tp.is_online = 1
+               AND tp.base_lat IS NOT NULL
+               AND tp.base_lng IS NOT NULL
+               AND (6371 * ACOS(
+                   COS(RADIANS(tp.base_lat)) * COS(RADIANS(?)) *
+                   COS(RADIANS(?) - RADIANS(tp.base_lng)) +
+                   SIN(RADIANS(tp.base_lat)) * SIN(RADIANS(?))
+               )) <= tp.service_radius_km`,
+            [bookingLat, bookingLng, bookingLat]
+        );
+
+        for (const tech of techRows) {
+            NotificationService.sendToUser(
+                Number(tech.user_id),
+                'New Job Available',
+                'A service request is available in your area',
+                { type: 'new_job_available', bookingId }
+            );
+        }
+    },
 };

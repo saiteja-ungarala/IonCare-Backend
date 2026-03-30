@@ -175,13 +175,14 @@ exports.BookingService = {
                 throw { type: 'AppError', message: 'Booking not found', statusCode: 404 };
             if (Number(booking.user_id) !== userId)
                 throw { type: 'AppError', message: 'Forbidden', statusCode: 403 };
-            if (booking.status !== 'pending' && booking.status !== 'confirmed') {
+            // Atomic status-guarded cancel — prevents race where a technician accepts the job
+            // between the status read above and the update below.
+            const [cancelResult] = yield db_1.default.query(`UPDATE bookings
+             SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, cancelled_at = NOW()
+             WHERE id = ? AND status IN ('pending', 'confirmed')`, [reason.trim(), userId, bookingId]);
+            if (cancelResult.affectedRows === 0) {
                 throw { type: 'AppError', message: 'Cannot cancel a booking that is already assigned/in_progress/completed/cancelled', statusCode: 400 };
             }
-            // Cancel the booking and record the reason
-            yield db_1.default.query(`UPDATE bookings
-             SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, cancelled_at = NOW()
-             WHERE id = ?`, [reason.trim(), userId, bookingId]);
             // Refund if a paid Razorpay payment exists for this booking
             let refunded = false;
             let refundAmount = 0;

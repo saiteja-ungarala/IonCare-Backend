@@ -10,18 +10,6 @@ import { EmailService } from './email.service';
 import { NotificationService } from './notification.service';
 import { BOOKING_STATUS } from '../config/constants';
 
-// Compute the end of a time slot given a HH:MM or HH:MM:SS start and a duration in minutes.
-// Used when the caller does not supply an explicit time_slot_end.
-function computeTimeSlotEnd(startTime: string, durationMinutes: number): string {
-    const parts = startTime.split(':').map(Number);
-    const h = parts[0] ?? 0;
-    const m = parts[1] ?? 0;
-    const totalMins = h * 60 + m + (durationMinutes > 0 ? durationMinutes : 60);
-    const endH = Math.floor(totalMins / 60) % 24;
-    const endM = totalMins % 60;
-    return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}:00`;
-}
-
 // Map status query param to actual DB status values
 const STATUS_MAP: Record<string, string[]> = {
     active: [BOOKING_STATUS.PENDING, BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.ASSIGNED, BOOKING_STATUS.IN_PROGRESS],
@@ -73,10 +61,6 @@ export const BookingService = {
         }
 
         // Transactional booking create — checks First Service Free benefit
-        // Resolve the slot end: use the caller's value or compute from service duration
-        const timeSlotEnd: string = data.time_slot_end
-            ?? computeTimeSlotEnd(data.scheduled_time, service.duration_minutes ?? 0);
-
         const conn = await pool.getConnection();
         await conn.beginTransaction();
         let bookingId = 0;
@@ -92,11 +76,11 @@ export const BookingService = {
             const initialStatus = finalPrice === 0 ? BOOKING_STATUS.CONFIRMED : BOOKING_STATUS.PENDING;
 
             const [result] = await conn.execute<ResultSetHeader>(
-                `INSERT INTO bookings (user_id, service_id, address_id, scheduled_date, scheduled_time, time_slot_end, status, price, notes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                `INSERT INTO bookings (user_id, service_id, address_id, scheduled_date, scheduled_time, status, price, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     userId, data.service_id, data.address_id || null,
-                    data.scheduled_date, data.scheduled_time, timeSlotEnd,
+                    data.scheduled_date, data.scheduled_time,
                     initialStatus, finalPrice, data.notes || null,
                 ]
             );

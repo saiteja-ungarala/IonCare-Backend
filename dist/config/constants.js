@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TXN_SOURCE = exports.TXN_TYPE = exports.CART_STATUS = exports.ORDER_STATUS = exports.BOOKING_STATUS = exports.ROLES = void 0;
+exports.TXN_SOURCE = exports.TXN_TYPE = exports.CART_STATUS = exports.ORDER_STATUS = exports.SCHEDULE_EARLY_START_BUFFER_MINUTES = exports.BOOKING_STATUS = exports.ROLES = void 0;
 exports.ROLES = {
     CUSTOMER: 'customer',
     TECHNICIAN: 'technician',
@@ -15,6 +15,9 @@ exports.BOOKING_STATUS = {
     COMPLETED: 'completed',
     CANCELLED: 'cancelled',
 };
+// How many minutes before the scheduled start time a technician is allowed to
+// begin the job. Raise this value to give technicians more lead time.
+exports.SCHEDULE_EARLY_START_BUFFER_MINUTES = 15;
 exports.ORDER_STATUS = {
     PENDING: 'pending',
     PAID: 'paid',
